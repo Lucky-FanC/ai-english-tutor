@@ -1,0 +1,14 @@
+{
+  "name": "English Around You",
+  "short_name": "English",
+  "description": "私人 AI 英语外教 — 说中文，得到最自然的英语",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f5fa",
+  "theme_color": "#5b6cff",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
