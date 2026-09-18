@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>English Around You · 把生活变成英语课堂</title>
-<meta name="description" content="私人 AI 英语外教：说中文，得到最自然的英语并真人般朗读。纯前端，无后端。">
+<title>English Around You · 场景英语句库</title>
+<meta name="description" content="按场景整理的地道英语句库：英文+中文对照，点击即读。离线可用，无需登录。">
 <meta name="theme-color" content="#5b6cff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,235 +14,41 @@
 </head>
 <body>
 
-<!-- ================= 首页 ================= -->
-<div id="view-home" class="view">
+<div class="view">
 
-  <header class="home-head">
+  <!-- 顶部：品牌 + 搜索 -->
+  <header class="topbar">
     <div class="brand">
-      <div class="brand-name">English Around You</div>
-      <div class="brand-sub">Turn your everyday life into English.</div>
-    </div>
-    <div class="head-icons">
-      <button class="icon-btn" id="btn-me" title="My English 我的英语">⭐</button>
-      <button class="icon-btn" id="btn-history" title="历史对话">🕘</button>
-      <button class="icon-btn" id="btn-settings-home" title="设置">⚙️</button>
+      <span class="brand-logo">🌍</span>
+      <div>
+        <div class="brand-name">English Around You</div>
+        <div class="brand-sub">场景句库 · 点开就能说</div>
+      </div>
     </div>
   </header>
 
-  <div class="home-scroll">
-
-    <div class="mode-seg" id="mode-seg">
-      <button data-mode="translate"><b>Translate</b><i>怎么说</i></button>
-      <button data-mode="coach"><b>Coach</b><i>外教</i></button>
-      <button data-mode="life" class="active"><b>Life</b><i>生活</i></button>
-    </div>
-
-    <div class="ask">What are you doing today?</div>
-
-    <div id="review-card" class="review-card" hidden>
-      <div class="review-title">📌 今日复习 · 3 expressions from your life</div>
-      <div id="review-list" class="review-list"></div>
-    </div>
-
-    <div class="quick-label">选择今天的场景</div>
-    <div class="quick-chips" id="quick-chips"></div>
-    <div class="quick-links">
-      <button class="text-btn" id="btn-all-scn">🌐 全部场景（50+）</button>
-      <button class="text-btn" id="btn-new-scn">＋ 创建我的场景</button>
-    </div>
-
-    <div class="mic-zone">
-      <button id="home-mic" class="big-mic" title="点击说话">🎙</button>
-      <div id="home-status" class="voice-status">Tap to speak · 点一下，说中文</div>
-    </div>
-
-    <div class="home-inputrow">
-      <textarea id="home-input" rows="1" placeholder="或者在这里输入中文…（Enter 发送）"></textarea>
-      <button id="home-send" class="send-btn">发送</button>
-    </div>
-
-    <label class="eo-row">
-      <span>🇺🇸 English Only（仅英语模式）</span>
-      <input type="checkbox" id="eo-quick">
-      <i class="switch"></i>
-    </label>
-
-    <div class="home-foot">🔒 私人工具 · 所有数据保存在本机浏览器 · 把每天的生活，变成英语课堂</div>
+  <div class="search-row">
+    <input id="search" class="search-input" type="search" autocomplete="off"
+           placeholder="🔍 搜句子，如：谢谢 / hospital / 迟到">
+    <button id="search-clear" class="icon-btn" title="清空" hidden>✕</button>
   </div>
+
+  <!-- 分类条（横向滚动） -->
+  <div id="cat-bar" class="cat-bar"></div>
+
+  <!-- 主内容区（JS 渲染） -->
+  <main id="main" class="main"></main>
+
+  <!-- 底部导航 -->
+  <nav class="tabbar">
+    <button data-tab="home" class="tab active"><span>🏠</span><i>场景</i></button>
+    <button data-tab="favs" class="tab"><span>⭐</span><i>收藏</i></button>
+    <button data-tab="set" class="tab"><span>⚙️</span><i>设置</i></button>
+  </nav>
+
 </div>
 
-<!-- ================= 对话页 ================= -->
-<div id="view-chat" class="view" hidden>
-
-  <header class="chat-head">
-    <button class="icon-btn" id="btn-back" title="返回首页">←</button>
-    <button class="chip" id="chat-scn" title="切换场景">🌤 日常生活</button>
-    <button class="chip mode-chip" id="chat-mode" title="切换模式">Life</button>
-    <div class="head-icons">
-      <button class="icon-btn" id="btn-handsfree" title="免提模式（驾驶）">🚗</button>
-      <button class="icon-btn" id="btn-settings-chat" title="设置">⚙️</button>
-    </div>
-  </header>
-
-  <div id="handsfree-note" class="hf-note" hidden>🚗 Hands-free 已开启 — Keep your attention on the road. 驾驶时请勿操作手机，使用免提语音交互。</div>
-
-  <main id="chat" class="chat"></main>
-
-  <div id="status-bar" class="status-bar">🎙 Tap to speak</div>
-
-  <footer class="inputbar">
-    <button id="btn-mic" class="mic-btn" title="点击说话">🎙</button>
-    <button id="lang-toggle" class="lang-btn" title="输入语言">中</button>
-    <textarea id="input" rows="1" placeholder="说中文或输入中文…（Enter 发送）"></textarea>
-    <button id="btn-send" class="send-btn">发送</button>
-  </footer>
-  <div class="idk-row"><button id="btn-idk" class="text-btn">💡 I don't know how to say it · 不会说</button></div>
-</div>
-
-<!-- ================= 跟读练习 ================= -->
-<div id="practice" class="overlay" hidden>
-  <div class="prac-panel">
-    <button id="prac-close" class="icon-btn prac-close">✕</button>
-    <div class="prac-label">Practice · 跟读练习</div>
-    <div id="prac-en" class="prac-en"></div>
-    <div id="prac-simple" class="prac-simple"></div>
-    <button id="prac-listen" class="tool-btn">🔊 再听一遍</button>
-    <button id="prac-micbtn" class="prac-mic">🎙 <span>Your turn · 点击跟读</span></button>
-    <div id="prac-status" class="prac-status"></div>
-    <div id="prac-result" class="prac-result" hidden></div>
-    <div class="prac-actions">
-      <button id="prac-again" class="tool-btn" hidden>↺ 再试一次</button>
-      <button id="prac-done" class="tool-btn" hidden>完成 ✓</button>
-    </div>
-  </div>
-</div>
-
-<!-- ================= 全部场景 ================= -->
-<div class="backdrop" id="scn-backdrop"></div>
-<div class="sheet" id="scn-sheet">
-  <div class="sheet-head">选择场景<button class="icon-btn" id="scn-close" style="margin-left:auto">✕</button></div>
-  <div class="sheet-body">
-    <input id="scn-search" class="search-input" placeholder="搜索场景…">
-    <div id="scn-grid" class="scn-grid"></div>
-    <div class="scn-custom">
-      <div class="quick-label" style="margin:14px 0 8px">＋ 创建我的场景</div>
-      <div class="row">
-        <input id="scn-custom-input" placeholder="例如：周末带孩子去海边">
-        <button id="scn-custom-btn" class="send-btn">创建</button>
-      </div>
-      <div id="scn-custom-status" class="prac-status"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ================= 历史 ================= -->
-<div class="backdrop" id="hist-backdrop"></div>
-<div class="sheet" id="hist-sheet">
-  <div class="sheet-head">🕘 历史对话<button class="icon-btn" id="hist-close" style="margin-left:auto">✕</button></div>
-  <div class="sheet-body" id="hist-list"></div>
-</div>
-
-<!-- ================= My English ================= -->
-<div class="backdrop" id="me-backdrop"></div>
-<div class="sheet" id="me-sheet">
-  <div class="sheet-head">⭐ My English · 我的生活英语
-    <button class="icon-btn" id="me-clear" title="清空" style="margin-left:auto">🗑</button>
-    <button class="icon-btn" id="me-close" title="关闭">✕</button>
-  </div>
-  <div class="sheet-body" id="me-list"></div>
-</div>
-
-<!-- ================= 设置 ================= -->
-<div class="backdrop" id="set-backdrop"></div>
-<div class="sheet" id="set-sheet">
-  <div class="sheet-head">⚙️ 设置<button class="icon-btn" id="set-close" style="margin-left:auto">✕</button></div>
-  <div class="sheet-body">
-
-    <div class="set-group-title">学习偏好</div>
-    <div class="row">
-      <div class="field"><label>English Level 英语水平</label>
-        <select id="set-level">
-          <option value="beginner">Beginner 入门</option>
-          <option value="elementary" selected>Elementary 初级</option>
-          <option value="intermediate">Intermediate 中级</option>
-          <option value="advanced">Advanced 高级</option>
-        </select>
-      </div>
-      <div class="field"><label>口音 Accent</label>
-        <select id="set-accent">
-          <option value="us" selected>🇺🇸 American</option>
-          <option value="uk">🇬🇧 British</option>
-        </select>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field"><label>默认模式 Learning Mode</label>
-        <select id="set-mode">
-          <option value="translate">Translate 怎么说</option>
-          <option value="coach">Coach 外教</option>
-          <option value="life" selected>Life 生活</option>
-        </select>
-      </div>
-      <div class="field"><label>语速 Voice Speed</label>
-        <select id="set-speed">
-          <option value="slow">Slow 慢速</option>
-          <option value="normal" selected>Normal 自然</option>
-        </select>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field"><label>语音输入语言</label>
-        <select id="set-lang">
-          <option value="zh" selected>中文（说中文出英语）</option>
-          <option value="en">English（直接说英语）</option>
-        </select>
-      </div>
-      <div class="field"><label>朗读声音 Voice</label><select id="set-voice"></select></div>
-    </div>
-    <label class="check"><input type="checkbox" id="set-autoplay" checked> Auto Play 自动朗读 AI 的英语</label>
-    <label class="check"><input type="checkbox" id="set-eo"> 🇺🇸 English Only 尽量只用英语（不理解时可求助中文）</label>
-
-    <div class="set-group-title">AI 服务（纯前端直连，Key 只保存在本机）</div>
-    <div class="field">
-      <label>AI 服务商</label>
-      <select id="set-provider"></select>
-      <a class="link" id="set-keyurl" target="_blank" rel="noopener">获取 API Key</a>
-    </div>
-    <div class="field">
-      <label>API Key</label>
-      <div class="row">
-        <input id="set-key" type="password" placeholder="sk-…" autocomplete="off" style="flex:1">
-        <button class="icon-btn" id="set-key-eye" title="显示 / 隐藏">👁</button>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field"><label>模型 Model</label><input id="set-model"></div>
-      <div class="field"><label>接口地址（OpenAI 兼容）</label><input id="set-base"></div>
-    </div>
-    <div class="field">
-      <label>给外教的额外要求（可选）</label>
-      <textarea id="set-extra" placeholder="例如：我常带孩子出行，多给亲子场景表达…"></textarea>
-    </div>
-    <div class="row" style="margin-bottom:16px">
-      <button class="tool-btn" id="set-test" style="padding:9px 16px;font-size:13px">测试连接</button>
-      <span id="set-test-status" style="font-size:13px;color:var(--muted)"></span>
-    </div>
-    <button class="primary-btn" id="set-save">保存设置</button>
-    <p class="privacy">🔒 纯静态网页，无后端服务器。API Key、对话与收藏只保存在你的浏览器（localStorage）里，请求由浏览器直接发往你选择的 AI 服务商；清除浏览器数据即可全部删除。语音识别由浏览器提供（Safari 最稳，Chrome 需可访问 Google 服务）。</p>
-  </div>
-</div>
-
-<!-- 点词翻译弹层 -->
-<div id="pop">
-  <div id="pop-word"></div>
-  <div id="pop-result">翻译中…</div>
-  <div class="pop-actions">
-    <button class="tool-btn" id="pop-speak">🔊 发音</button>
-    <button class="tool-btn" id="pop-save">⭐ 收藏</button>
-  </div>
-</div>
-
-<div id="toast"></div>
+<script src="data.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
