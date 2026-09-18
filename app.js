@@ -54,6 +54,31 @@ function pickVoice() {
 }
 
 let speakingCard = null;
+
+/* 句子以「角色: 」开头时，剥掉角色名再朗读（支持 Mom: / 妈妈: / Kids: 等） */
+function stripRole(text) {
+  return text.replace(/^(?:[A-Za-z]{1,12}|[^a-zA-Z:：]{1,8})[:：]\s*/, '');
+}
+function splitRole(text) {
+  const m = text.match(/^(?:([A-Za-z]{1,12})|([^a-zA-Z:：]{1,8}))[:：]\s*/);
+  return m ? { who: m[1] || m[2], rest: text.slice(m[0].length) } : null;
+}
+function whoClass(who) {
+  let h = 0;
+  for (let i = 0; i < who.length; i++) h = (h * 31 + who.charCodeAt(i)) % 997;
+  return 'who-' + (h % 4);
+}
+function lineWithRole(text, cls) {
+  const box = el('div', cls);
+  const p = splitRole(text);
+  if (p) {
+    box.appendChild(el('span', 's-who ' + whoClass(p.who), p.who));
+    box.appendChild(document.createTextNode(p.rest));
+  } else {
+    box.textContent = text;
+  }
+  return box;
+}
 function stopSpeak() {
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   if (speakingCard) { speakingCard.classList.remove('speaking'); const d = speakingCard.querySelector('.s-hint'); if (d) d.remove(); speakingCard = null; }
@@ -64,7 +89,7 @@ function speak(text, card) {
   // 再点同一句 = 停止
   if (speakingCard === card) { stopSpeak(); return; }
   stopSpeak();
-  const u = new SpeechSynthesisUtterance(text);
+  const u = new SpeechSynthesisUtterance(stripRole(text));
   const v = pickVoice();
   if (v) u.voice = v;
   u.lang = v ? v.lang : (state.set.accent === 'gb' ? 'en-GB' : 'en-US');
@@ -105,8 +130,8 @@ function sentCard(scn, idx, showTag) {
   const sid = scn.id + ':' + idx;
   const card = el('button', 's-card');
   card.dataset.sid = sid;
-  card.appendChild(el('div', 's-en', en));
-  card.appendChild(el('div', 's-zh', zh));
+  card.appendChild(lineWithRole(en, 's-en'));
+  card.appendChild(lineWithRole(zh, 's-zh'));
   if (showTag) {
     const cat = CATS.find(c => c.id === scn.cat);
     card.appendChild(el('span', 's-tag', (cat ? cat.emoji + ' ' + cat.zh + ' · ' : '') + scn.zh));
@@ -143,13 +168,13 @@ function renderHome() {
     const info = el('div', 'scn-info');
     info.appendChild(el('div', 'scn-zh', s.zh));
     info.appendChild(el('div', 'scn-en', s.en));
-    info.appendChild(el('div', 'scn-n', s.sents.length + ' 句'));
+    info.appendChild(el('div', 'scn-n', (s.sents.length / 2) + ' 轮对话'));
     card.appendChild(info);
     card.addEventListener('click', () => { state.detail = s.id; render(); });
     grid.appendChild(card);
   });
   main.appendChild(grid);
-  main.appendChild(el('div', 'count-note', '共 ' + totalSents + ' 句 · 点击句子即可朗读'));
+  main.appendChild(el('div', 'count-note', '共 ' + SCENARIOS.length + ' 个场景 · ' + (totalSents / 2) + ' 轮对话 · 点击句子即可朗读'));
 }
 
 function renderDetail() {
@@ -163,7 +188,7 @@ function renderDetail() {
   head.appendChild(back);
   const t = el('div', 'detail-title');
   t.appendChild(el('div', 'detail-zh', scn.emoji + ' ' + scn.zh));
-  t.appendChild(el('div', 'detail-en', scn.en + ' · ' + scn.sents.length + ' 句'));
+  t.appendChild(el('div', 'detail-en', scn.en + ' · ' + (scn.sents.length / 2) + ' 轮对话'));
   head.appendChild(t);
   main.appendChild(head);
   scn.sents.forEach((_, i) => main.appendChild(sentCard(scn, i, false)));
@@ -254,7 +279,7 @@ function renderSet() {
   const about = el('div', 'about');
   about.innerHTML = '';
   about.appendChild(el('div', null, '📖 关于'));
-  about.appendChild(el('div', null, 'English Around You 场景句库：' + SCENARIOS.length + ' 个场景 · ' + totalSents + ' 句地道表达。'));
+  about.appendChild(el('div', null, 'English Around You 场景对话库：' + SCENARIOS.length + ' 个场景 · ' + (totalSents / 2) + ' 轮真实对话。'));
   about.appendChild(el('div', null, '完全离线可用，无需注册、无需联网、无需 API Key。'));
   about.appendChild(el('div', null, '手机浏览器「添加到主屏幕」后像 App 一样使用。'));
   main.appendChild(about);
