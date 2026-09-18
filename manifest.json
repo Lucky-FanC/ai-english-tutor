@@ -1,7 +1,7 @@
 {
-  "name": "English Around You",
-  "short_name": "English",
-  "description": "私人 AI 英语外教 — 说中文，得到最自然的英语",
+  "name": "English Around You · 场景句库",
+  "short_name": "场景英语",
+  "description": "按场景整理的地道英语句库：英文+中文对照，点击即读。离线可用。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
