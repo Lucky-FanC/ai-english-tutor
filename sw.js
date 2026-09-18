@@ -1,6 +1,6 @@
 /* English Around You — 简易 Service Worker：离线可用 + 更新自动生效 */
-const CACHE = 'eay-v1';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon.svg'];
+const CACHE = 'eay-v2';
+const ASSETS = ['./', './index.html', './style.css', './app.js', './data.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
