@@ -312,6 +312,7 @@ function renderFavs() {
 
 /* 发音人选择面板：列出设备上所有英文声音，按自然度排序，可逐个试听 */
 function renderVoicePanel() {
+  if (state.set.engine === 'online') return; /* 在线模式下本地发音人无效，隐藏 */
   main.appendChild(el('div', 'sec-title', '🎙 发音人'));
   const vpanel = el('div', 'set-panel');
   if (!('speechSynthesis' in window)) {
