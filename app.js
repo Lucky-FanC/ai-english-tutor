@@ -25,7 +25,7 @@ const state = {
   detail: null,         // 正在浏览的场景 id
   query: '',
   favs: store.get('favs', []),   // ["场景id:序号", ...]
-  set: Object.assign({ rate: 1, accent: 'us' }, store.get('set', {})),
+  set: Object.assign({ rate: 1, accent: 'us', voice: 'auto' }, store.get('set', {})),
 };
 
 const totalSents = SCENARIOS.reduce((n, s) => n + s.sents.length, 0);
@@ -35,25 +35,31 @@ let voices = [];
 function loadVoices() { voices = speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().indexOf('en') === 0); }
 if ('speechSynthesis' in window) {
   loadVoices();
-  speechSynthesis.onvoiceschanged = loadVoices;
+  speechSynthesis.onvoiceschanged = () => { loadVoices(); if (state.tab === 'set') renderSet(); };
 }
 
+/* 声音自然度评分：真人感强的排前面 */
+function scoreVoice(v) {
+  const n = v.name.toLowerCase();
+  let s = 0;
+  if (/siri|samantha|alex\b|victoria|allison|nicky|susan|ava|zoe|aaron|karen|moira/.test(n)) s += 12;
+  if (/microsoft.*(online|natural)|\bnatural\b|\bneural\b|aria|jenny|guy\b|sonia|libby|ryan/.test(n)) s += 11;
+  if (/google/.test(n)) s += 8;
+  if (v.localService) s += 2;
+  if (/compact|espeak|robot|fred/.test(n)) s -= 12;
+  const isGb = /en[-_]gb/i.test(v.lang);
+  if ((state.set.accent === 'gb' && isGb) || (state.set.accent !== 'gb' && /en[-_]us/i.test(v.lang))) s += 3;
+  return s;
+}
+function sortedVoices() { return voices.slice().sort((a, b) => scoreVoice(b) - scoreVoice(a) || a.name.localeCompare(b.name)); }
 function pickVoice() {
   if (!voices.length) return null;
-  const want = state.set.accent === 'gb' ? ['en-gb', 'en_gb'] : ['en-us', 'en_us'];
-  const score = v => {
-    const l = v.lang.toLowerCase().replace('_', '-');
-    let s = 0;
-    if (want.some(w => l.indexOf(w.slice(0, 5)) === 0)) s += 10;
-    if (/google/i.test(v.name)) s += 4;
-    if (/natural|neural|aria|samantha|zira|allison|ava|susan/i.test(v.name)) s += 3;
-    if (/compact|espeak/i.test(v.name)) s -= 5;
-    return s;
-  };
-  return voices.slice().sort((a, b) => score(b) - score(a))[0];
+  if (state.set.voice && state.set.voice !== 'auto') {
+    const v = voices.find(x => x.voiceURI === state.set.voice);
+    if (v) return v;
+  }
+  return sortedVoices()[0];
 }
-
-let speakingCard = null;
 
 /* 句子以「角色: 」开头时，剥掉角色名再朗读（支持 Mom: / 妈妈: / Kids: 等） */
 function stripRole(text) {
@@ -79,22 +85,40 @@ function lineWithRole(text, cls) {
   }
   return box;
 }
+
+let speakingCard = null;
+let speakGen = 0;
+
+/* 朗读节奏：按标点分段，段间停顿更像真人说话；疑问/感叹句语调轻微上扬
+   （注意：不把冒号当停顿点，避免把时间 7:30 切成两半） */
+const PAUSE_MS = { ',': 150, '，': 150, ';': 200, '；': 200, '.': 320, '。': 320, '!': 320, '！': 320, '?': 320, '？': 320, '…': 320 };
+function splitForSpeech(text) {
+  const parts = text.match(/[^,.!?;，。！？；…]+[,.!?;，。！？；…]*/g) || [text];
+  return parts.map(t => t.trim()).filter(Boolean).map(t => ({ txt: t, pause: PAUSE_MS[t.slice(-1)] || 60 }));
+}
+
 function stopSpeak() {
+  speakGen++;
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   if (speakingCard) { speakingCard.classList.remove('speaking'); const d = speakingCard.querySelector('.s-hint'); if (d) d.remove(); speakingCard = null; }
 }
 
-function speak(text, card) {
+function finishSpeak(card, gen) {
+  if (gen !== speakGen) return;
+  if (card && speakingCard === card) {
+    card.classList.remove('speaking');
+    const d = card.querySelector('.s-hint');
+    if (d) d.remove();
+    speakingCard = null;
+  }
+}
+
+function speak(text, card, voiceOverride) {
   if (!('speechSynthesis' in window)) { alert('抱歉，你的浏览器不支持语音朗读，请用 Safari 或 Chrome 打开。'); return; }
-  // 再点同一句 = 停止
-  if (speakingCard === card) { stopSpeak(); return; }
+  if (card && speakingCard === card) { stopSpeak(); return; }
   stopSpeak();
-  const u = new SpeechSynthesisUtterance(stripRole(text));
-  const v = pickVoice();
-  if (v) u.voice = v;
-  u.lang = v ? v.lang : (state.set.accent === 'gb' ? 'en-GB' : 'en-US');
-  u.rate = state.set.rate;
-  u.pitch = 1;
+  const gen = ++speakGen;
+  const voice = voiceOverride || pickVoice();
   if (card) {
     card.classList.add('speaking');
     const hint = el('div', 's-hint');
@@ -103,8 +127,24 @@ function speak(text, card) {
     card.appendChild(hint);
     card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     speakingCard = card;
-    u.onend = u.onerror = () => { if (speakingCard === card) { card.classList.remove('speaking'); const d = card.querySelector('.s-hint'); if (d) d.remove(); speakingCard = null; } };
   }
+  playSegs(splitForSpeech(stripRole(text)), 0, voice, gen, card);
+}
+
+function playSegs(segs, i, voice, gen, card) {
+  if (gen !== speakGen) return;
+  if (i >= segs.length) { finishSpeak(card, gen); return; }
+  const seg = segs[i];
+  const u = new SpeechSynthesisUtterance(seg.txt);
+  if (voice) { u.voice = voice; u.lang = voice.lang; }
+  else u.lang = state.set.accent === 'gb' ? 'en-GB' : 'en-US';
+  u.rate = state.set.rate;
+  u.pitch = /[?!？！]$/.test(seg.txt) ? 1.05 : 1;
+  u.onend = () => {
+    if (gen !== speakGen) return;
+    setTimeout(() => playSegs(segs, i + 1, voice, gen, card), seg.pause);
+  };
+  u.onerror = () => { if (gen === speakGen) finishSpeak(card, gen); };
   speechSynthesis.speak(u);
 }
 
@@ -231,9 +271,51 @@ function renderFavs() {
   });
 }
 
+/* 发音人选择面板：列出设备上所有英文声音，按自然度排序，可逐个试听 */
+function renderVoicePanel() {
+  main.appendChild(el('div', 'sec-title', '🎙 发音人'));
+  const vpanel = el('div', 'set-panel');
+  if (!('speechSynthesis' in window)) {
+    vpanel.appendChild(el('div', 'about', '当前浏览器不支持语音合成，请用 Safari 或 Chrome 打开。'));
+    main.appendChild(vpanel);
+    return;
+  }
+  const auto = { voiceURI: 'auto', name: '自动（推荐）', localService: true, _auto: true };
+  const all = [auto].concat(sortedVoices());
+  const showAll = !!state._vAll;
+  const shown = showAll ? all : all.slice(0, 6);
+  const vlist = el('div', 'voice-list');
+  shown.forEach(v => {
+    const cur = state.set.voice === v.voiceURI;
+    const item = el('label', 'voice-item' + (cur ? ' active' : ''));
+    const radio = el('input');
+    radio.type = 'radio'; radio.name = 'eay-voice'; radio.checked = cur;
+    radio.addEventListener('change', () => { state.set.voice = v.voiceURI; store.set('set', state.set); renderSet(); });
+    item.appendChild(radio);
+    item.appendChild(el('span', 'vi-name', v._auto ? '自动（每次选最自然的声音）' : v.name));
+    item.appendChild(el('span', 'vi-tag', v._auto ? '智能' : (v.localService ? '本地' : '在线')));
+    if (!v._auto) {
+      const tryBtn = el('button', 'vi-try', '🔊');
+      tryBtn.title = '试听';
+      tryBtn.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); speak('Hi! This is how I sound. Hope you like my voice!', null, v); });
+      item.appendChild(tryBtn);
+    }
+    vlist.appendChild(item);
+  });
+  vpanel.appendChild(vlist);
+  if (all.length > 6) {
+    const more = el('button', 'text-btn voice-more', showAll ? '收起 ▲' : '显示全部 ' + (all.length - 1) + ' 个声音 ▼');
+    more.addEventListener('click', () => { state._vAll = !state._vAll; renderSet(); });
+    vpanel.appendChild(more);
+  }
+  vpanel.appendChild(el('div', 'about', '先点 🔊 逐个试听，再勾选喜欢的。「在线」声音（如 Microsoft Natural）通常最像真人；「本地」声音不联网也能用。'));
+  main.appendChild(vpanel);
+}
+
 function renderSet() {
   main.textContent = '';
   main.appendChild(el('div', 'sec-title', '⚙️ 设置'));
+  renderVoicePanel();
 
   const panel = el('div', 'set-panel');
 
