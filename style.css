@@ -121,3 +121,12 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .tab span{font-size:20px}
 .tab i{font-style:normal;font-size:10.5px;font-weight:600}
 .tab.active{color:var(--accent)}
+
+/* 真人发音 Key */
+.key-row{display:flex;gap:8px}
+.key-input{flex:1;min-width:0;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-size:15px;outline:none;background:var(--panel)}
+.key-input:focus{border-color:var(--accent)}
+.key-save{padding:10px 16px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;font-weight:600}
+.key-save:active{background:#4553d6}
+.key-try{display:block;margin:8px 0;padding:10px 16px;border:none;border-radius:10px;background:#eef1ff;color:var(--accent);font-size:15px;font-weight:600}
+.key-try:active{background:#dfe4ff}
