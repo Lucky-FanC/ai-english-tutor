@@ -25,7 +25,7 @@ const state = {
   detail: null,         // 正在浏览的场景 id
   query: '',
   favs: store.get('favs', []),   // ["场景id:序号", ...]
-  set: Object.assign({ rate: 1, accent: 'us', voice: 'auto' }, store.get('set', {})),
+  set: Object.assign({ rate: 1, accent: 'us', voice: 'auto', engine: 'auto' }, store.get('set', {})),
 };
 
 const totalSents = SCENARIOS.reduce((n, s) => n + s.sents.length, 0);
@@ -88,6 +88,30 @@ function lineWithRole(text, cls) {
 
 let speakingCard = null;
 let speakGen = 0;
+let curAudio = null;
+
+/* 本地语音是否可用（微信内置浏览器没有 speechSynthesis，国产机常无英文语音引擎） */
+function localTTSAvailable() {
+  if (!('speechSynthesis' in window)) return false;
+  const vs = speechSynthesis.getVoices() || [];
+  return vs.some(v => (v.lang || '').toLowerCase().indexOf('en') === 0);
+}
+
+/* 在线发音（百度翻译引擎，国内直连、支持整句长句、任何浏览器可播） */
+function speakOnline(text, gen, card) {
+  const spd = Math.max(1, Math.min(7, Math.round(3 / state.set.rate)));
+  const url = 'https://fanyi.baidu.com/gettts?lan=en&spd=' + spd + '&text=' + encodeURIComponent(text);
+  const audio = new Audio();
+  curAudio = audio;
+  audio.addEventListener('ended', () => { if (gen === speakGen) finishSpeak(card, gen); });
+  audio.addEventListener('error', () => {
+    if (gen !== speakGen) return;
+    finishSpeak(card, gen);
+    alert('在线发音加载失败，请检查网络后重试。\n（在线发音需要联网）');
+  });
+  audio.src = url;
+  audio.play().catch(() => { if (gen === speakGen) finishSpeak(card, gen); });
+}
 
 /* 朗读节奏：按标点分段，段间停顿更像真人说话；疑问/感叹句语调轻微上扬
    （注意：不把冒号当停顿点，避免把时间 7:30 切成两半） */
@@ -99,6 +123,7 @@ function splitForSpeech(text) {
 
 function stopSpeak() {
   speakGen++;
+  if (curAudio) { curAudio.pause(); curAudio = null; }
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   if (speakingCard) { speakingCard.classList.remove('speaking'); const d = speakingCard.querySelector('.s-hint'); if (d) d.remove(); speakingCard = null; }
 }
@@ -114,7 +139,6 @@ function finishSpeak(card, gen) {
 }
 
 function speak(text, card, voiceOverride) {
-  if (!('speechSynthesis' in window)) { alert('抱歉，你的浏览器不支持语音朗读，请用 Safari 或 Chrome 打开。'); return; }
   if (card && speakingCard === card) { stopSpeak(); return; }
   stopSpeak();
   const gen = ++speakGen;
@@ -128,11 +152,26 @@ function speak(text, card, voiceOverride) {
     card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     speakingCard = card;
   }
-  playSegs(splitForSpeech(stripRole(text)), 0, voice, gen, card);
+  const plain = stripRole(text);
+  // 引擎选择：auto=本地可用就用本地，否则自动走在线（微信/国产机兜底）
+  const useLocal = voiceOverride ? true
+    : state.set.engine === 'local' ? ('speechSynthesis' in window)
+    : state.set.engine === 'online' ? false
+    : localTTSAvailable();
+  if (useLocal) {
+    playSegs(splitForSpeech(plain), 0, voice, gen, card);
+  } else {
+    speakOnline(plain, gen, card);
+  }
 }
 
 function playSegs(segs, i, voice, gen, card) {
   if (gen !== speakGen) return;
+  if (!('speechSynthesis' in window)) {
+    finishSpeak(card, gen);
+    alert('抱歉，当前浏览器不支持本地语音，请在「设置」里把发音方式切换为「在线发音」。');
+    return;
+  }
   if (i >= segs.length) { finishSpeak(card, gen); return; }
   const seg = segs[i];
   const u = new SpeechSynthesisUtterance(seg.txt);
@@ -315,6 +354,20 @@ function renderVoicePanel() {
 function renderSet() {
   main.textContent = '';
   main.appendChild(el('div', 'sec-title', '⚙️ 设置'));
+
+  // 发音方式
+  main.appendChild(el('div', 'sec-title', '🔊 发音方式'));
+  const epanel = el('div', 'set-panel');
+  const eseg = el('div', 'seg');
+  [['auto', '自动'], ['local', '本地语音'], ['online', '在线发音']].forEach(([id, label]) => {
+    const b = el('button', state.set.engine === id ? 'active' : '', label);
+    b.addEventListener('click', () => { state.set.engine = id; store.set('set', state.set); renderSet(); });
+    eseg.appendChild(b);
+  });
+  epanel.appendChild(eseg);
+  epanel.appendChild(el('div', 'about', '「自动」= 本地语音可用就用本地，否则自动走在线（推荐）。「本地语音」离线可用，但部分国产手机没有英文语音引擎。「在线发音」支持微信在内的任何浏览器，需联网，语速设置同样生效。'));
+  main.appendChild(epanel);
+
   renderVoicePanel();
 
   const panel = el('div', 'set-panel');
