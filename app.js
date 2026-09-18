@@ -106,28 +106,41 @@ function localTTSAvailable() {
 }
 
 /* 在线发音入口：填了真人语音Key → MiniMax神经语音（真人级）；否则或失败 → 百度翻译TTS兜底 */
-const MM_VOICES = ['English_Graceful_Lady', 'English_Stable_Man', 'male-qn-qingse'];
+let mmStatus = ''; /* 'ok' 或 'fail:原因'，用于设置页显示连接状态 */
+const MM_CANDIDATES = [
+  { model: 'speech-02-turbo', voice_id: 'English_Graceful_Lady' },
+  { model: 'speech-02-turbo', voice_id: 'English_Stable_Man' },
+  { model: 'speech-02-turbo', voice_id: 'female-shaonv' },
+  { model: 'speech-02-hd', voice_id: 'English_Graceful_Lady' },
+  { model: 'speech-2.6-turbo', voice_id: 'English_Graceful_Lady' }
+];
 
 function speakRemote(text, gen, card) {
   if (state.set.mmKey) { speakMiniMax(text, gen, card, 0); return; }
   speakBaidu(text, gen, card);
 }
 
-function speakMiniMax(text, gen, card, vi) {
+function speakMiniMax(text, gen, card, ci) {
+  const c = MM_CANDIDATES[ci];
+  if (!c) { speakBaidu(text, gen, card); return; }
   const speed = Math.max(0.5, Math.min(2, state.set.rate * (state.set.level === 1 ? 0.75 : 1)));
   fetch('https://api.minimaxi.com/v1/t2a_v2', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.set.mmKey },
     body: JSON.stringify({
-      model: 'speech-02-turbo', text: text, voice_id: MM_VOICES[vi],
-      response_format: 'hex',
-      audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 },
-      speed: speed, vol: 1, pitch: 0
+      model: c.model, text: text, stream: false,
+      voice_setting: { voice_id: c.voice_id, speed: speed, vol: 1, pitch: 0 },
+      audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 }
     })
   }).then(r => r.json()).then(j => {
     if (gen !== speakGen) return;
     const hex = j && j.data && j.data.audio;
-    if (!hex) throw new Error('mm-no-audio');
+    if (!hex) {
+      const msg = (j && j.base_resp && j.base_resp.status_msg) || '未知错误';
+      mmStatus = 'fail:' + msg;
+      throw new Error(msg.toLowerCase().indexOf('balance') !== -1 ? 'mm-balance' : 'mm-no-audio');
+    }
+    mmStatus = 'ok';
     const bin = new Uint8Array(hex.length / 2);
     for (let i = 0; i < bin.length; i++) bin[i] = parseInt(hex.substr(i * 2, 2), 16);
     const url = URL.createObjectURL(new Blob([bin], { type: 'audio/mpeg' }));
@@ -136,10 +149,11 @@ function speakMiniMax(text, gen, card, vi) {
     audio.addEventListener('ended', () => { URL.revokeObjectURL(url); if (gen === speakGen) finishSpeak(card, gen); });
     audio.addEventListener('error', () => { URL.revokeObjectURL(url); if (gen === speakGen) speakBaidu(text, gen, card); });
     audio.play().catch(() => { if (gen === speakGen) speakBaidu(text, gen, card); });
-  }).catch(() => {
+  }).catch(err => {
     if (gen !== speakGen) return;
-    if (vi + 1 < MM_VOICES.length) speakMiniMax(text, gen, card, vi + 1);
-    else speakBaidu(text, gen, card);
+    /* 余额不足：不再重试其他候选，直接回退百度（设置页会显示原因） */
+    if (err && err.message === 'mm-balance') { speakBaidu(text, gen, card); return; }
+    speakMiniMax(text, gen, card, ci + 1);
   });
 }
 
@@ -456,6 +470,12 @@ function renderSet() {
     const ktry = el('button', 'key-try', '🔊 试听真人发音');
     ktry.addEventListener('click', () => speakRemote('Hi! This is a real neural voice. I sound much more natural, don\'t I?', null));
     kpanel.appendChild(ktry);
+    let stText;
+    if (!mmStatus) stText = '连接状态：还没测试过，点上面的「试听真人发音」试试。';
+    else if (mmStatus === 'ok') stText = '✓ 连接状态：真人语音已生效！现在点任何句子都是真人级发音。';
+    else if (mmStatus.indexOf('balance') !== -1) stText = '✗ 连接状态：MiniMax 账户没有可用额度（余额不足）。请打开 platform.minimaxi.com 控制台 → 完成实名认证、领取语音免费资源包，或少量充值（几块钱就能用很久），然后回来重新试听。';
+    else stText = '✗ 连接状态：' + mmStatus.slice(5) + '。请检查 Key 是否复制完整，或联系平台客服。';
+    kpanel.appendChild(el('div', 'about', stText));
   }
   kpanel.appendChild(el('div', 'about', '填写后，在线发音升级为「神经语音」——接近真人的美式发音，支持整句，免费额度个人用足够。获取方法（约2分钟）：① 浏览器打开 platform.minimaxi.com ② 手机号注册登录 ③ 进入「API 管理」创建 API Key ④ 复制 Key 粘贴到这里点保存。Key 只保存在你自己手机的浏览器里。'));
   main.appendChild(kpanel);
