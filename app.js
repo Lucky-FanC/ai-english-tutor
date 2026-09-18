@@ -25,8 +25,16 @@ const state = {
   detail: null,         // 正在浏览的场景 id
   query: '',
   favs: store.get('favs', []),   // ["场景id:序号", ...]
-  set: Object.assign({ rate: 1, accent: 'us', voice: 'auto', engine: 'auto' }, store.get('set', {})),
+  set: Object.assign({ rate: 1, accent: 'us', voice: 'auto', engine: 'auto', level: 2, mmKey: '' }, store.get('set', {})),
 };
+
+/* 当前难度等级的句子组：1级/3级读 data-levels.js 的 LEVELS，缺省回退 2级（data.js 的 sents） */
+function curSents(sc) {
+  const lv = window.LEVELS && window.LEVELS[sc.id];
+  if (state.set.level === 1 && lv && lv.s1) return lv.s1;
+  if (state.set.level === 3 && lv && lv.s3) return lv.s3;
+  return sc.sents;
+}
 
 const totalSents = SCENARIOS.reduce((n, s) => n + s.sents.length, 0);
 
@@ -97,8 +105,45 @@ function localTTSAvailable() {
   return vs.some(v => (v.lang || '').toLowerCase().indexOf('en') === 0);
 }
 
-/* 在线发音（百度翻译引擎，国内直连、支持整句长句、任何浏览器可播） */
-function speakOnline(text, gen, card) {
+/* 在线发音入口：填了真人语音Key → MiniMax神经语音（真人级）；否则或失败 → 百度翻译TTS兜底 */
+const MM_VOICES = ['English_Graceful_Lady', 'English_Stable_Man', 'male-qn-qingse'];
+
+function speakRemote(text, gen, card) {
+  if (state.set.mmKey) { speakMiniMax(text, gen, card, 0); return; }
+  speakBaidu(text, gen, card);
+}
+
+function speakMiniMax(text, gen, card, vi) {
+  const speed = Math.max(0.5, Math.min(2, state.set.rate * (state.set.level === 1 ? 0.75 : 1)));
+  fetch('https://api.minimaxi.com/v1/t2a_v2', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.set.mmKey },
+    body: JSON.stringify({
+      model: 'speech-02-turbo', text: text, voice_id: MM_VOICES[vi],
+      response_format: 'hex',
+      audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 },
+      speed: speed, vol: 1, pitch: 0
+    })
+  }).then(r => r.json()).then(j => {
+    if (gen !== speakGen) return;
+    const hex = j && j.data && j.data.audio;
+    if (!hex) throw new Error('mm-no-audio');
+    const bin = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bin.length; i++) bin[i] = parseInt(hex.substr(i * 2, 2), 16);
+    const url = URL.createObjectURL(new Blob([bin], { type: 'audio/mpeg' }));
+    const audio = new Audio(url);
+    curAudio = audio;
+    audio.addEventListener('ended', () => { URL.revokeObjectURL(url); if (gen === speakGen) finishSpeak(card, gen); });
+    audio.addEventListener('error', () => { URL.revokeObjectURL(url); if (gen === speakGen) speakBaidu(text, gen, card); });
+    audio.play().catch(() => { if (gen === speakGen) speakBaidu(text, gen, card); });
+  }).catch(() => {
+    if (gen !== speakGen) return;
+    if (vi + 1 < MM_VOICES.length) speakMiniMax(text, gen, card, vi + 1);
+    else speakBaidu(text, gen, card);
+  });
+}
+
+function speakBaidu(text, gen, card) {
   const spd = Math.max(1, Math.min(7, Math.round(3 / state.set.rate)));
   const url = 'https://fanyi.baidu.com/gettts?lan=en&spd=' + spd + '&text=' + encodeURIComponent(text);
   const audio = new Audio();
@@ -161,7 +206,7 @@ function speak(text, card, voiceOverride) {
   if (useLocal) {
     playSegs(splitForSpeech(plain), 0, voice, gen, card);
   } else {
-    speakOnline(plain, gen, card);
+    speakRemote(plain, gen, card);
   }
 }
 
@@ -192,7 +237,7 @@ const sid2Sent = sid => {
   const i = sid.lastIndexOf(':');
   const scn = SCENARIOS.find(s => s.id === sid.slice(0, i));
   const idx = +sid.slice(i + 1);
-  return scn && scn.sents[idx] ? { scn, idx, en: scn.sents[idx][0], zh: scn.sents[idx][1] } : null;
+  return scn && curSents(scn)[idx] ? { scn, idx, en: curSents(scn)[idx][0], zh: curSents(scn)[idx][1] } : null;
 };
 const isFav = sid => state.favs.indexOf(sid) !== -1;
 function toggleFav(sid, btn) {
@@ -205,7 +250,7 @@ function toggleFav(sid, btn) {
 
 /* ---------- 句子卡片 ---------- */
 function sentCard(scn, idx, showTag) {
-  const [en, zh] = scn.sents[idx];
+  const [en, zh] = curSents(scn)[idx];
   const sid = scn.id + ':' + idx;
   const card = el('button', 's-card');
   card.dataset.sid = sid;
@@ -247,7 +292,7 @@ function renderHome() {
     const info = el('div', 'scn-info');
     info.appendChild(el('div', 'scn-zh', s.zh));
     info.appendChild(el('div', 'scn-en', s.en));
-    info.appendChild(el('div', 'scn-n', (s.sents.length / 2) + ' 轮对话'));
+    info.appendChild(el('div', 'scn-n', (curSents(s).length / 2) + ' 轮对话'));
     card.appendChild(info);
     card.addEventListener('click', () => { state.detail = s.id; render(); });
     grid.appendChild(card);
@@ -267,10 +312,10 @@ function renderDetail() {
   head.appendChild(back);
   const t = el('div', 'detail-title');
   t.appendChild(el('div', 'detail-zh', scn.emoji + ' ' + scn.zh));
-  t.appendChild(el('div', 'detail-en', scn.en + ' · ' + (scn.sents.length / 2) + ' 轮对话'));
+  t.appendChild(el('div', 'detail-en', scn.en + ' · ' + (curSents(scn).length / 2) + ' 轮对话 · ' + ({1:'🐣1级',2:'🌿2级',3:'🚀3级'})[state.set.level]));
   head.appendChild(t);
   main.appendChild(head);
-  scn.sents.forEach((_, i) => main.appendChild(sentCard(scn, i, false)));
+  curSents(scn).forEach((_, i) => main.appendChild(sentCard(scn, i, false)));
 }
 
 function renderSearch(q) {
@@ -280,7 +325,7 @@ function renderSearch(q) {
   let hits = 0;
   SCENARIOS.forEach(scn => {
     const matched = [];
-    scn.sents.forEach((s, i) => {
+    curSents(scn).forEach((s, i) => {
       if (s[0].toLowerCase().indexOf(query) !== -1 || s[1].indexOf(query) !== -1) matched.push(i);
     });
     if (matched.length) {
@@ -368,6 +413,52 @@ function renderSet() {
   epanel.appendChild(eseg);
   epanel.appendChild(el('div', 'about', '「自动」= 本地语音可用就用本地，否则自动走在线（推荐）。「本地语音」离线可用，但部分国产手机没有英文语音引擎。「在线发音」支持微信在内的任何浏览器，需联网，语速设置同样生效。'));
   main.appendChild(epanel);
+
+  // 句子难度
+  main.appendChild(el('div', 'sec-title', '🎚 句子难度'));
+  const lpanel = el('div', 'set-panel');
+  const lseg = el('div', 'seg');
+  [[1, '🐣 1级 启蒙'], [2, '🌿 2级 日常'], [3, '🚀 3级 进阶']].forEach(([lv, label]) => {
+    const b = el('button', state.set.level === lv ? 'active' : '', label);
+    b.addEventListener('click', () => { state.set.level = lv; store.set('set', state.set); renderSet(); });
+    lseg.appendChild(b);
+  });
+  lpanel.appendChild(lseg);
+  const ldesc = {
+    1: '🐣 1级 = 给孩子的超简单句（2-6个单词），在线发音自动放慢，适合启蒙跟读。',
+    2: '🌿 2级 = 中级日常口语，简短自然的实用对话（原有内容）。',
+    3: '🚀 3级 = 进阶表达，更地道的说法和常用短语动词，适合拔高。'
+  };
+  lpanel.appendChild(el('div', 'about', ldesc[state.set.level]));
+  main.appendChild(lpanel);
+
+  // 真人发音 Key（可选，填了在线发音升级为神经语音）
+  main.appendChild(el('div', 'sec-title', '🗝 真人发音 Key（可选）'));
+  const kpanel = el('div', 'set-panel');
+  const krow = el('div', 'key-row');
+  const kinput = el('input', 'key-input');
+  kinput.type = 'text';
+  kinput.autocomplete = 'off';
+  kinput.spellcheck = false;
+  kinput.placeholder = '粘贴 MiniMax API Key（sk- 开头）';
+  kinput.value = state.set.mmKey || '';
+  krow.appendChild(kinput);
+  const ksave = el('button', 'key-save', '保存');
+  ksave.addEventListener('click', () => {
+    state.set.mmKey = kinput.value.trim();
+    store.set('set', state.set);
+    alert(state.set.mmKey ? '已保存！现在点句子就是接近真人的发音了。' : '已清除，在线发音恢复为普通模式。');
+    renderSet();
+  });
+  krow.appendChild(ksave);
+  kpanel.appendChild(krow);
+  if (state.set.mmKey) {
+    const ktry = el('button', 'key-try', '🔊 试听真人发音');
+    ktry.addEventListener('click', () => speakRemote('Hi! This is a real neural voice. I sound much more natural, don\'t I?', null));
+    kpanel.appendChild(ktry);
+  }
+  kpanel.appendChild(el('div', 'about', '填写后，在线发音升级为「神经语音」——接近真人的美式发音，支持整句，免费额度个人用足够。获取方法（约2分钟）：① 浏览器打开 platform.minimaxi.com ② 手机号注册登录 ③ 进入「API 管理」创建 API Key ④ 复制 Key 粘贴到这里点保存。Key 只保存在你自己手机的浏览器里。'));
+  main.appendChild(kpanel);
 
   renderVoicePanel();
 
