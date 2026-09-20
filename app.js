@@ -90,7 +90,10 @@ function aiScene(name) {
     const out = [];
     txt.split('\n').forEach(line => {
       const m = line.match(/^\s*([^\s:：|｜]{1,14})[:：]\s*(.+?)\s*[|｜]\s*(.+?)\s*$/);
-      if (m && m[2] && m[3]) out.push([m[1] + ': ' + m[2], m[1] + '：' + m[3]]);
+      if (m && m[2] && m[3]) {
+        const zh = m[3].replace(/^[^\s:：]{1,14}[:：]\s*/, ''); /* AI 若已在中文侧带角色则剥掉 */
+        out.push([m[1] + ': ' + m[2], m[1] + '：' + zh]);
+      }
     });
     if (out.length < 4) throw new Error('生成结果格式异常，请重试一次');
     return out;
