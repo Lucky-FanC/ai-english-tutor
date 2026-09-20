@@ -1,0 +1,12 @@
+{
+  "name": "KET 单词默写小助手",
+  "short_name": "KET默写",
+  "description": "儿童 KET 听音默写背词工具",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#FFF7EF",
+  "theme_color": "#FF8A3D",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
