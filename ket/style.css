@@ -187,6 +187,20 @@ body {
 .switch.on::after { left: 25px; }
 .danger { color: var(--red); font-size: .85rem; background: none; border: 1.5px solid var(--red-soft); border-radius: 12px; padding: 10px 16px; cursor: pointer; }
 
+/* ---------- 已学单词列表 ---------- */
+.wrow {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1.5px solid #F1E4D7;
+  border-radius: 14px; padding: 10px 12px; margin-bottom: 8px;
+  cursor: pointer;
+}
+.wrow:active { transform: scale(.985); }
+.ww { font-weight: 800; font-size: 1.02rem; min-width: 74px; color: var(--text); }
+.wp { color: var(--text-soft); font-size: .78rem; width: 32px; flex: none; }
+.wz { flex: 1; color: var(--text); font-size: .9rem; }
+.wd { color: var(--text-soft); font-size: .72rem; flex: none; }
+.ws { flex: none; }
+
 /* ---------- Toast ---------- */
 .key-warn {
   margin: 2px auto 0; max-width: 92%;
