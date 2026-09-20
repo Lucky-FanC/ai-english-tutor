@@ -326,6 +326,8 @@ function afterRender() {
   if (view.name === 'dict') {
     const inp = document.getElementById('dinput');
     if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    /* 每换到下一个单词自动朗读，无需手动点喇叭；想再听点喇叭即可 */
+    if (view.words && view.words[view.idx]) say(view.words[view.idx].w);
   }
 }
 function startDict(opts) {
@@ -449,7 +451,6 @@ function renderWrong() {
       '<div style="flex:1;min-width:0"><div class="w">' + esc(x.w) + ' <span class="muted">' + esc(x.p) + ' ' + esc(x.zh) + '</span></div>' +
       '<div class="m">错 ' + r.c + ' 次' + (r.ok ? ' · 已对 ' + r.ok + '/2 次' : '') + ' · ' + esc(r.last || '') + '</div></div>' +
       (r.ok ? '<div class="oktag">再对' + (2 - r.ok) + '次毕业</div>' : '') +
-      '<button class="del" onclick="KET.delWrong(\'' + esc(w).replace(/'/g, "\\'") + '\')">✕</button>' +
       '</div>';
   }).join('');
   return headerBack('错题库') +
