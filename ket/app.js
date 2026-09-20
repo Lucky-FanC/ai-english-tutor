@@ -173,7 +173,7 @@ function render() {
   const r = {
     home: renderHome, learn: renderLearn, dict: renderDict, result: renderResult,
     wrong: renderWrong, test: renderTest, report: renderReport, set: renderSet,
-    review: renderReview
+    review: renderReview, words: renderWords
   }[view.name];
   appEl.innerHTML = r ? r() : '';
   afterRender();
@@ -224,8 +224,8 @@ function renderHome() {
     '<button class="gear" onclick="KET.goSet()">⚙️</button></div>' +
     hero +
     '<div class="stat-row">' +
-    '<div class="stat"><div class="num">' + learnedN + '</div><div class="lbl">已学单词</div></div>' +
-    '<div class="stat"><div class="num">' + wrongN + '</div><div class="lbl">待巩固</div></div>' +
+    '<div class="stat" style="cursor:pointer" onclick="KET.goWords()"><div class="num">' + learnedN + '</div><div class="lbl">已学单词 ›</div></div>' +
+    '<div class="stat" style="cursor:pointer" onclick="KET.goWrong()"><div class="num">' + wrongN + '</div><div class="lbl">待巩固 ›</div></div>' +
     '<div class="stat"><div class="num">' + streakDays() + '</div><div class="lbl">连续学习</div></div>' +
     '</div>' +
     '<div class="menu-item" onclick="KET.goWrong()"><div class="ico">📒</div><div><div class="t">错题库</div><div class="s">专项刷错词，连对 2 次自动移出</div></div><div class="spacer"></div>' +
@@ -278,7 +278,7 @@ function renderLearn() {
   const last = view.idx === view.words.length - 1;
   const keyWarn = effKey() ? '' : '<div class="key-warn">⚠️ 真人发音 Key 未配置：到「设置」页填入（和场景英语是同一个 Key）</div>';
   const dots = view.words.map((_, i) => '<div class="dot' + (i === view.idx ? ' cur' : '') + '"></div>').join('');
-  return headerBack('学新词 ' + (view.idx + 1) + '/' + view.words.length) +
+  return headerBack((view.title || '学新词') + ' ' + (view.idx + 1) + '/' + view.words.length) +
     '<div class="card learn-word">' +
     '<div class="w">' + esc(x.w) + '</div>' +
     '<div class="zh">' + esc(x.zh) + '</div>' +
@@ -415,6 +415,31 @@ function redoDict() {
 }
 
 /* ---------------- 错题库 ---------------- */
+/* ---------------- 已学单词列表（点词听音 + 搜索） ---------------- */
+function filterRows(q) {
+  q = (q || '').toLowerCase();
+  document.querySelectorAll('.wrow').forEach(r => {
+    r.style.display = (r.getAttribute('data-w') || '').indexOf(q) > -1 ? '' : 'none';
+  });
+}
+function renderWords() {
+  const ks = Object.keys(learned).sort((a, b) => String(learned[b].d).localeCompare(String(learned[a].d)) || a.localeCompare(b));
+  const rows = ks.map(w => {
+    const o = wordObj(w);
+    return '<div class="wrow" data-w="' + esc((w + ' ' + o.zh).toLowerCase()) + '" onclick="KET.say(\'' + esc(w).replace(/'/g, "\\'") + '\')">' +
+      '<div class="ww">' + esc(w) + '</div>' +
+      '<div class="wp">' + esc(o.p) + '</div>' +
+      '<div class="wz">' + esc(o.zh) + '</div>' +
+      '<div class="wd">' + esc(String(learned[w].d || '').slice(5)) + '</div>' +
+      '<div class="ws">🔊</div>' +
+      '</div>';
+  }).join('');
+  return headerBack('已学单词') +
+    '<input class="set-input" placeholder="🔍 输入字母或中文搜索…" oninput="KET.filterRows(this.value)">' +
+    '<div class="muted" style="margin:8px 2px 10px">共 ' + ks.length + ' 词 · 点任意单词听发音，最近学的排前面</div>' +
+    (rows || '<div class="muted" style="text-align:center;padding:30px 0">还没有学过的单词</div>');
+}
+
 function renderWrong() {
   const keys = Object.keys(wrongBk).sort((a, b) => String(wrongBk[b].last).localeCompare(String(wrongBk[a].last)));
   const rows = keys.map(w => {
@@ -429,15 +454,19 @@ function renderWrong() {
   }).join('');
   return headerBack('错题库') +
     (keys.length
-      ? '<div class="card">' + rows + '</div><div class="muted" style="text-align:center;margin-bottom:12px">每次最多练 12 个，默写正确 2 次自动移出</div>' +
-        '<button class="btn" onclick="KET.startWrongDrill()">开始错题默写 ✏️</button>'
+      ? '<div class="card">' + rows + '</div><div class="muted" style="text-align:center;margin-bottom:12px">每次最多练 12 个：先逐个看词听音学习，再整体默写，连对 2 次自动移出</div>' +
+        '<button class="btn" onclick="KET.startWrongDrill()">开始学习：先看词听音，再默写 ✏️</button>'
       : '<div class="card" style="text-align:center;padding:48px 20px"><div style="font-size:3rem">🎉</div><div style="font-weight:800;margin-top:10px">错题库空空如也</div><div class="muted" style="margin-top:6px">继续保持，宝贝真棒！</div></div>');
 }
 function delWrong(w) { delete wrongBk[w]; saveWrong(); render(); toast('已移出错题库'); }
 function startWrongDrill() {
   const keys = Object.keys(wrongBk).sort((a, b) => String(wrongBk[a].last).localeCompare(String(wrongBk[b].last))).slice(0, 12);
   if (!keys.length) { toast('错题库是空的'); return; }
-  startDict({ title: '错题默写', type: 'wrong', words: keys.map(wordObj), after: () => go({ name: 'wrong' }) });
+  const words = keys.map(wordObj);
+  go({
+    name: 'learn', title: '错题学习', words: words, idx: 0,
+    onDone: () => startDict({ title: '错题默写', type: 'wrong', words: words, after: () => go({ name: 'wrong' }) })
+  });
 }
 
 /* ---------------- 单词复习（自由复习，可反复练） ---------------- */
@@ -590,6 +619,7 @@ window.KET = {
   goWrong: () => go({ name: 'wrong' }), goTest: () => go({ name: 'test' }),
   goReport: () => go({ name: 'report' }), goSet: () => go({ name: 'set' }),
   goReview: () => go({ name: 'review' }),
+  goWords: () => go({ name: 'words' }), filterRows: filterRows,
   startToday: startToday, learnNext: learnNext, dictNext: dictNext,
   resultNext: resultNext, delWrong: delWrong, startWrongDrill: startWrongDrill,
   startTest: startTest, stepDaily: stepDaily, toggleSlow: toggleSlow,
