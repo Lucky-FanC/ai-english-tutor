@@ -399,6 +399,7 @@ function renderHome() {
     add.addEventListener('click', () => { state.detail = '_create'; render(); });
     grid.appendChild(add);
   }
+  grid.appendChild(ketEntryCard());
   list.forEach(s => {
     const card = el('button', 'scn-card');
     card.appendChild(el('span', 'scn-emoji', s.emoji));
@@ -730,21 +731,49 @@ function renderSet() {
 
 function render() {
   stopSpeak();
+  syncKetTab();
+  if (state.tab === 'ket') return; /* KET 默写工具：iframe 展示，不渲染主区 */
   if (state.query.trim()) { renderSearch(state.query); return; }
   if (state.tab === 'favs') { renderFavs(); return; }
   if (state.tab === 'set') { renderSet(); return; }
   if (state.detail) renderDetail(); else renderHome();
 }
 
+/* ---------- KET 默写工具（内嵌 iframe，同源共享 localStorage） ---------- */
+function syncKetTab() {
+  const on = state.tab === 'ket';
+  const f = $('#ket-frame');
+  if (f) f.hidden = !on;
+  if (main) main.hidden = on;
+  const sr = $('.search-row'); if (sr) sr.hidden = on;
+  const cb = $('#cat-bar'); if (cb) cb.hidden = on;
+}
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+  state.tab = name; state.detail = null; state.query = '';
+  const si = $('#search'); if (si) si.value = '';
+  const sc = $('#search-clear'); if (sc) sc.hidden = true;
+  render();
+}
+/* 首页 KET 入口卡片：读取 ket.* 本地数据展示学习进度 */
+function ketEntryCard() {
+  const g = (k) => { try { return JSON.parse(localStorage.getItem('ket.' + k) || '{}') || {}; } catch (e) { return {}; } };
+  const learnedN = Object.keys(g('learned')).length;
+  const wrongN = Object.keys(g('wrong')).length;
+  const card = el('button', 'scn-card ket-entry');
+  card.appendChild(el('span', 'scn-emoji', '📝'));
+  const info = el('div', 'scn-info');
+  info.appendChild(el('div', 'scn-zh', 'KET 单词默写'));
+  info.appendChild(el('div', 'scn-en', '每日听音背词 · 已学 ' + learnedN + '/1607' + (wrongN ? ' · 待巩固 ' + wrongN : '')));
+  card.appendChild(info);
+  card.appendChild(el('span', 'ket-go', '去默写 ›'));
+  card.addEventListener('click', () => switchTab('ket'));
+  return card;
+}
+
 /* ---------- Tab 切换 ---------- */
 document.querySelectorAll('.tab').forEach(t => {
-  t.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    state.tab = t.dataset.tab;
-    state.detail = null;
-    render();
-  });
+  t.addEventListener('click', () => switchTab(t.dataset.tab));
 });
 
 /* ---------- 搜索 ---------- */
