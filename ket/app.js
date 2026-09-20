@@ -326,9 +326,9 @@ function afterRender() {
   if (view.name === 'dict') {
     const inp = document.getElementById('dinput');
     if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    /* 每换到下一个单词自动朗读，无需手动点喇叭；想再听点喇叭即可 */
-    if (view.words && view.words[view.idx]) say(view.words[view.idx].w);
   }
+  /* 学习页和默写页：每翻到一个新单词自动朗读，想再听点喇叭即可 */
+  if ((view.name === 'dict' || view.name === 'learn') && view.words && view.words[view.idx]) say(view.words[view.idx].w);
 }
 function startDict(opts) {
   go(Object.assign({ name: 'dict', answers: {}, idx: 0 }, opts));
