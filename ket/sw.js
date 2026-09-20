@@ -1,5 +1,5 @@
 /* KET 默写小助手 Service Worker：整站离线缓存 */
-const CACHE = 'ket-v7';
+const CACHE = 'ket-v8';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'data-ket.js', 'manifest.json', 'icon.svg'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
