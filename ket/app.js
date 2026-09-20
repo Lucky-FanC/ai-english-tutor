@@ -608,8 +608,13 @@ function renderSet() {
     '</div>' +
     '<div class="card">' +
     '<div class="t" style="font-weight:800">数据</div>' +
-    '<div class="muted" style="margin:6px 0 10px">所有学习记录保存在本设备浏览器中，不会丢失</div>' +
-    '<button class="danger" onclick="KET.resetAll()">清空全部学习数据</button>' +
+    '<div class="muted" style="margin:6px 0 10px">所有学习记录保存在本设备浏览器中，不会丢失；清空需输入家长密码，防止孩子误操作</div>' +
+    (view.resetAsk
+      ? '<input id="resetpw" class="set-input" type="password" placeholder="请输入家长密码" autocomplete="off" autocapitalize="off" spellcheck="false">' +
+        '<div class="row" style="margin-top:10px">' +
+        '<button class="btn small secondary" onclick="KET.cancelReset()">取消</button>' +
+        '<button class="danger" onclick="KET.confirmReset()">确认清空（不可恢复）</button></div>'
+      : '<button class="danger" onclick="KET.askReset()">清空全部学习数据</button>') +
     '</div>' +
     '<div class="muted" style="text-align:center">KET 单词默写小助手 · 剑桥 A2 核心词库 ' + WORDS.length + ' 词</div>';
 }
@@ -629,9 +634,14 @@ function testVoice() {
   say('apple');
   setTimeout(render, 1200);
 }
-function resetAll() {
-  if (!confirm('确定要清空全部学习数据吗？此操作不可恢复。')) return;
-  if (!confirm('再确认一次：所有已学记录、错题库、测试记录都会被删除！')) return;
+/* 清空数据家长密码门：只存哈希不存明文，孩子误点也清不掉 */
+const RESET_HASH = 967719005;
+function hashStr(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h; }
+function askReset() { go({ name: 'set', resetAsk: true }); }
+function cancelReset() { go({ name: 'set' }); }
+function confirmReset() {
+  const v = (document.getElementById('resetpw') || {}).value || '';
+  if (hashStr(v.trim()) !== RESET_HASH) { toast('密码不对，没有清空任何数据'); return; }
   ['cfg', 'learned', 'wrong', 'done', 'log', 'session'].forEach(k => localStorage.removeItem('ket.' + k));
   location.reload();
 }
@@ -647,7 +657,8 @@ window.KET = {
   startToday: startToday, learnNext: learnNext, dictNext: dictNext,
   resultNext: resultNext, delWrong: delWrong, startWrongDrill: startWrongDrill,
   startTest: startTest, stepDaily: stepDaily, toggleSlow: toggleSlow,
-  saveKey: saveKey, testVoice: testVoice, resetAll: resetAll,
+  saveKey: saveKey, testVoice: testVoice,
+  askReset: askReset, cancelReset: cancelReset, confirmReset: confirmReset,
   quitDict: quitDict, resumeSession: resumeSession, redoDict: redoDict,
   startManualReview: startManualReview,
   _v: () => view, _s: () => ({ cfg: cfg, learned: learned, wrong: wrongBk, done: doneMap, log: logArr, session: store.get('session', null) })
