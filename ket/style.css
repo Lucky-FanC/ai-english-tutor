@@ -203,6 +203,12 @@ body {
 .wd { color: var(--text-soft); font-size: .72rem; flex: none; }
 .ws { flex: none; }
 
+/* ---------- 全部词汇 ---------- */
+.chip-row { display: flex; gap: 8px; margin-top: 10px; }
+.chip { border: 1.5px solid var(--accent-soft); background: var(--card); color: var(--text-soft); font-size: .82rem; font-weight: 700; padding: 7px 16px; border-radius: 16px; cursor: pointer; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wlearn { font-size: .68rem; color: var(--green); font-weight: 700; background: var(--green-soft); border-radius: 8px; padding: 1px 6px; margin-left: 4px; }
+
 /* ---------- Toast ---------- */
 .key-warn {
   margin: 2px auto 0; max-width: 92%;
