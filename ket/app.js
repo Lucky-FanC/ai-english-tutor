@@ -60,12 +60,12 @@ const MM_CANDIDATES = [
   { model: 'speech-02-turbo', voice_id: 'English_Stable_Man' },
   { model: 'speech-02-hd', voice_id: 'English_Graceful_Lady' }
 ];
-function speakMM(word, gen, ci) {
+function speakMM(word, gen, ci, key) {
   const c = MM_CANDIDATES[ci || 0];
-  if (!c) { speakBaidu(word, gen); return; }
+  if (!c) { speakLocal(word, gen); return; }
   fetch('https://api.minimaxi.com/v1/t2a_v2', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.mmKey },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
     body: JSON.stringify({
       model: c.model, text: word, stream: false,
       voice_setting: { voice_id: c.voice_id, speed: cfg.slow ? 0.7 : 0.95, vol: 1, pitch: 0 },
@@ -83,14 +83,45 @@ function speakMM(word, gen, ci) {
     a.addEventListener('ended', () => URL.revokeObjectURL(url));
     a.addEventListener('error', () => { URL.revokeObjectURL(url); if (gen === speakGen) speakBaidu(word, gen); });
     a.play().catch(() => { if (gen === speakGen) speakBaidu(word, gen); });
-  }).catch(() => { if (gen !== speakGen) return; speakMM(word, gen, (ci || 0) + 1); });
+  }).catch(() => { if (gen !== speakGen) return; speakMM(word, gen, (ci || 0) + 1, key); });
+}
+
+/* 从 English Around You 实时继承 MiniMax Key：同源 localStorage，
+   场景英语里更新 Key 后这里自动生效，不需要手动同步 */
+function eayKey() {
+  try {
+    const eay = JSON.parse(localStorage.getItem('eay2.set') || 'null');
+    return (eay && eay.mmKey) || '';
+  } catch (e) { return ''; }
+}
+function effKey() { return cfg.mmKey || eayKey(); }
+
+/* 无 Key 兜底：优先浏览器本地语音（Safari/Chrome 可用，微信内置浏览器没有），再退百度在线 TTS */
+function speakLocal(word, gen) {
+  if ('speechSynthesis' in window) {
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(word);
+      u.lang = 'en-GB';
+      u.rate = cfg.slow ? 0.8 : 1;
+      speechSynthesis.speak(u);
+      return;
+    } catch (e) {}
+  }
+  speakBaidu(word, gen);
 }
 function speakBaidu(word, gen) {
   const a = new Audio('https://fanyi.baidu.com/gettts?lan=en&spd=' + (cfg.slow ? 3 : 5) + '&text=' + encodeURIComponent(word));
   curAudio = a;
-  a.play().catch(() => {});
+  a.addEventListener('error', () => { if (gen === speakGen) toast('发音加载失败：请联网，或在「设置」里填写真人发音 Key'); });
+  a.play().catch(() => { if (gen === speakGen) toast('发音失败：请检查网络，或在「设置」里配置真人发音 Key'); });
 }
-function say(word) { speakGen++; if (cfg.mmKey) speakMM(word, speakGen, 0); else speakBaidu(word, speakGen); }
+function say(word) {
+  speakGen++;
+  const key = effKey();
+  if (key) speakMM(word, speakGen, 0, key);
+  else speakLocal(word, speakGen);
+}
 
 /* ---------------- 动态难度配比 ---------------- */
 function hardRatio() {
@@ -239,6 +270,7 @@ function startNewFlow() {
 function renderLearn() {
   const x = view.words[view.idx];
   const last = view.idx === view.words.length - 1;
+  const keyWarn = effKey() ? '' : '<div class="key-warn">⚠️ 真人发音 Key 未配置：到「设置」页填入（和场景英语是同一个 Key）</div>';
   const dots = view.words.map((_, i) => '<div class="dot' + (i === view.idx ? ' cur' : '') + '"></div>').join('');
   return headerBack('学新词 ' + (view.idx + 1) + '/' + view.words.length) +
     '<div class="card learn-word">' +
@@ -246,6 +278,7 @@ function renderLearn() {
     '<div class="zh">' + esc(x.zh) + '</div>' +
     '<div class="p">' + esc(x.p) + (x.lv === 2 ? ' · 进阶' : '') + '</div>' +
     '<button class="play-big" onclick="KET.say(\'' + esc(x.w).replace(/'/g, "\\'") + '\')">🔊</button>' +
+    keyWarn +
     '<div class="muted">先听一听，跟着读两遍，记住怎么拼</div>' +
     '</div>' +
     '<div class="dots">' + dots + '</div>' +
@@ -269,9 +302,11 @@ function renderDict() {
   }).join('');
   const val = view.answers[view.idx] != null ? esc(view.answers[view.idx]) : '';
   const last = view.idx === list.length - 1;
+  const keyWarn = effKey() ? '' : '<div class="key-warn">⚠️ 真人发音 Key 未配置：到「设置」页填入（和场景英语是同一个 Key）</div>';
   return headerBack(view.title + ' · ' + (view.idx + 1) + '/' + list.length) +
     '<div class="card dict-card">' +
     '<button class="play-big" onclick="KET.say(\'' + esc(cur.w).replace(/'/g, "\\'") + '\')">🔊</button>' +
+    keyWarn +
     '<div class="dict-hint">听发音，写出这个单词（可重复听）</div>' +
     '<input id="dinput" class="dict-input" value="' + val + '" placeholder="拼写单词…" ' +
     'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" ' +
@@ -435,8 +470,11 @@ function renderReport() {
 
 /* ---------------- 设置 ---------------- */
 function renderSet() {
-  const keyOk = mmStatus === 'ok';
-  const st = !mmStatus ? '还没测试过发音' : keyOk ? '✓ 真人发音已生效' : '✗ ' + mmStatus.replace(/^fail:/, '');
+  const hasKey = !!effKey();
+  const st = !hasKey ? '未配置 Key（会自动继承场景英语的 Key，若刚填写请刷新页面）'
+    : !mmStatus ? '还没测试过发音'
+    : mmStatus === 'ok' ? '✓ 真人发音已生效'
+    : '✗ ' + mmStatus.replace(/^fail:/, '');
   return headerBack('设置') +
     '<div class="card">' +
     '<div class="set-row"><div><div class="t">每日新词量</div><div class="s">严格 5–10 个，不超量</div></div>' +
@@ -446,8 +484,8 @@ function renderSet() {
     '</div>' +
     '<div class="card">' +
     '<div class="t" style="font-weight:800">真人发音 Key</div>' +
-    '<div class="muted" style="margin-top:4px">与「English Around You」共用 MiniMax Key，已自动继承；也可单独填写</div>' +
-    '<input id="mmkey" class="set-input" placeholder="sk-api-..." value="' + esc(cfg.mmKey) + '">' +
+    '<div class="muted" style="margin-top:4px">与「English Around You」共用 MiniMax Key，已自动实时继承，无需重复填写；也可在此单独覆盖</div>' +
+    '<input id="mmkey" class="set-input" placeholder="留空则自动使用场景英语里配置的 Key" value="' + esc(cfg.mmKey) + '">' +
     '<div class="row" style="margin-top:10px"><button class="btn small secondary" onclick="KET.saveKey()">保存 Key</button><div class="muted">' + esc(st) + '</div></div>' +
     '<button class="btn small ghost" style="margin-top:10px" onclick="KET.testVoice()">🔊 测试发音（apple）</button>' +
     '</div>' +
