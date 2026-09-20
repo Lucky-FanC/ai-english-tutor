@@ -40,10 +40,14 @@
   <!-- 主内容区（JS 渲染） -->
   <main id="main" class="main"></main>
 
+  <!-- KET 单词默写工具（内嵌，tab 切换显隐） -->
+  <iframe id="ket-frame" class="ket-frame" src="./ket/" title="KET 单词默写小助手" hidden></iframe>
+
   <!-- 底部导航 -->
   <nav class="tabbar">
     <button data-tab="home" class="tab active"><span>🏠</span><i>场景</i></button>
     <button data-tab="favs" class="tab"><span>⭐</span><i>收藏</i></button>
+    <button data-tab="ket" class="tab"><span>📝</span><i>默写</i></button>
     <button data-tab="set" class="tab"><span>⚙️</span><i>设置</i></button>
   </nav>
 
