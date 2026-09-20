@@ -173,7 +173,7 @@ function render() {
   const r = {
     home: renderHome, learn: renderLearn, dict: renderDict, result: renderResult,
     wrong: renderWrong, test: renderTest, report: renderReport, set: renderSet,
-    review: renderReview, words: renderWords
+    review: renderReview, words: renderWords, allwords: renderAllWords
   }[view.name];
   appEl.innerHTML = r ? r() : '';
   afterRender();
@@ -230,6 +230,7 @@ function renderHome() {
     '</div>' +
     '<div class="menu-item" onclick="KET.goWrong()"><div class="ico">📒</div><div><div class="t">错题库</div><div class="s">专项刷错词，连对 2 次自动移出</div></div><div class="spacer"></div>' +
     (wrongN ? '<div class="badge">' + wrongN + '</div>' : '') + '</div>' +
+    '<div class="menu-item" onclick="KET.goAll()"><div class="ico">📚</div><div><div class="t">全部词汇</div><div class="s">' + WORDS.length + ' 词完整词表 · 可搜索 · 点读发音</div></div><div class="spacer"></div><div class="muted">›</div></div>' +
     '<div class="menu-item" onclick="KET.goReview()"><div class="ico">🔁</div><div><div class="t">单词复习</div><div class="s">今日 / 昨日 / 最近7天 / 随机抽查</div></div><div class="spacer"></div><div class="muted">›</div></div>' +
     '<div class="menu-item" onclick="KET.goTest()"><div class="ico">🎯</div><div><div class="t">阶段测试</div><div class="s">周测 · 月测 · 自定义区间测</div></div><div class="spacer"></div><div class="muted">›</div></div>' +
     '<div class="menu-item" onclick="KET.goReport()"><div class="ico">📊</div><div><div class="t">学习报告</div><div class="s">进度、正确率、历史记录</div></div><div class="spacer"></div><div class="muted">›</div></div>';
@@ -442,6 +443,27 @@ function renderWords() {
     (rows || '<div class="muted" style="text-align:center;padding:30px 0">还没有学过的单词</div>');
 }
 
+/* ---------------- 全部词汇（完整词表：搜索 + 难度筛选 + 点读 + 已学标记） ---------------- */
+function renderAllWords() {
+  const lv = view.lv || 0;
+  const pool = WORDS.filter(x => !lv || x.lv === lv).slice().sort((a, b) => a.w.localeCompare(b.w));
+  const rows = pool.map(o =>
+    '<div class="wrow" data-w="' + esc((o.w + ' ' + o.zh).toLowerCase()) + '" onclick="KET.say(\'' + esc(o.w).replace(/'/g, "\\'") + '\')">' +
+    '<div class="ww">' + esc(o.w) + (learned[o.w] ? ' <span class="wlearn">已学</span>' : '') + '</div>' +
+    '<div class="wp">' + esc(o.p) + '</div>' +
+    '<div class="wz">' + esc(o.zh) + '</div>' +
+    '<div class="wd">' + (o.lv === 2 ? '进阶' : '') + '</div>' +
+    '<div class="ws">🔊</div>' +
+    '</div>').join('');
+  const chip = (v, label) => '<button class="chip' + (lv === v ? ' on' : '') + '" onclick="KET.allLv(' + v + ')">' + label + '</button>';
+  return headerBack('全部词汇') +
+    '<input class="set-input" placeholder="🔍 输入字母或中文搜索…" oninput="KET.filterRows(this.value)">' +
+    '<div class="chip-row">' + chip(0, '全部 ' + WORDS.length) + chip(1, '简单') + chip(2, '进阶') + '</div>' +
+    '<div class="muted" style="margin:8px 2px 10px">共 ' + pool.length + ' 词 · 点任意单词听发音</div>' +
+    rows;
+}
+function allLv(lv) { go({ name: 'allwords', lv: lv }); }
+
 function renderWrong() {
   const keys = Object.keys(wrongBk).sort((a, b) => String(wrongBk[b].last).localeCompare(String(wrongBk[a].last)));
   const rows = keys.map(w => {
@@ -610,7 +632,7 @@ function testVoice() {
 function resetAll() {
   if (!confirm('确定要清空全部学习数据吗？此操作不可恢复。')) return;
   if (!confirm('再确认一次：所有已学记录、错题库、测试记录都会被删除！')) return;
-  ['cfg', 'learned', 'wrong', 'done', 'log'].forEach(k => localStorage.removeItem('ket.' + k));
+  ['cfg', 'learned', 'wrong', 'done', 'log', 'session'].forEach(k => localStorage.removeItem('ket.' + k));
   location.reload();
 }
 
@@ -621,6 +643,7 @@ window.KET = {
   goReport: () => go({ name: 'report' }), goSet: () => go({ name: 'set' }),
   goReview: () => go({ name: 'review' }),
   goWords: () => go({ name: 'words' }), filterRows: filterRows,
+  goAll: () => go({ name: 'allwords', lv: 0 }), allLv: allLv,
   startToday: startToday, learnNext: learnNext, dictNext: dictNext,
   resultNext: resultNext, delWrong: delWrong, startWrongDrill: startWrongDrill,
   startTest: startTest, stepDaily: stepDaily, toggleSlow: toggleSlow,
