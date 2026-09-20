@@ -188,6 +188,12 @@ body {
 .danger { color: var(--red); font-size: .85rem; background: none; border: 1.5px solid var(--red-soft); border-radius: 12px; padding: 10px 16px; cursor: pointer; }
 
 /* ---------- Toast ---------- */
+.key-warn {
+  margin: 2px auto 0; max-width: 92%;
+  background: var(--red-soft); color: var(--red);
+  font-size: .82rem; line-height: 1.5;
+  padding: 9px 14px; border-radius: 12px;
+}
 .toast {
   position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%) translateY(20px);
   background: rgba(58, 50, 42, .92); color: #fff; padding: 12px 22px;
