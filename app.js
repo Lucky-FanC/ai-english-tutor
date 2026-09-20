@@ -36,6 +36,67 @@ function curSents(sc) {
   return sc.sents;
 }
 
+/* ---------- 自定义内容（自建场景 + 自己添加的句子，只存在本设备浏览器） ---------- */
+const customScenes = () => store.get('customScenes', []);
+const customSentsMap = () => store.get('customSents', {});
+const allScenarios = () => SCENARIOS.concat(customScenes());
+const findScn = id => allScenarios().find(s => s.id === id);
+
+/* ---------- AI 生成（MiniMax 大语言模型，与真人发音共用同一个 Key） ---------- */
+const MM_CHAT_MODELS = ['MiniMax-M2', 'MiniMax-M1', 'MiniMax-Text-01', 'abab6.5s-chat'];
+function mmChat(messages, mi) {
+  mi = mi || 0;
+  const model = MM_CHAT_MODELS[mi];
+  if (!model) return Promise.reject(new Error('模型都不可用，请稍后再试'));
+  return fetch('https://api.minimaxi.com/v1/text/chatcompletion_v2', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.set.mmKey },
+    body: JSON.stringify({ model: model, messages: messages, temperature: 0.6, max_tokens: 1500 })
+  }).then(r => r.json()).then(j => {
+    const txt = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+    if (!txt) throw new Error((j && j.base_resp && j.base_resp.status_msg) || '生成失败');
+    return txt.trim();
+  }).catch(err => {
+    const m = ((err && err.message) || '').toLowerCase();
+    if (m.indexOf('balance') !== -1) throw err; /* 余额不足不重试 */
+    if (mi + 1 < MM_CHAT_MODELS.length) return mmChat(messages, mi + 1);
+    throw err;
+  });
+}
+
+/* 中文句子 → 地道英文（用户加句用） */
+function aiTranslate(zh) {
+  return mmChat([
+    { role: 'system', content: '你是口语英语翻译专家。把用户输入的中文翻译成地道、自然的日常英语口语，简短、适合跟读朗读。只输出英文翻译本身，不要解释、不要引号、不要任何其他文字。' },
+    { role: 'user', content: zh }
+  ]).then(en => {
+    en = en.replace(/^["'“”‘’]+|["'“”‘’。\.]+$/g, '').trim();
+    if (!en) throw new Error('生成结果为空，请换个说法重试');
+    return en;
+  });
+}
+
+/* 场景名 → 按当前难度生成 5 轮对话 */
+const LEVEL_BRIEF = {
+  1: '面向幼儿英语启蒙：每句 2-6 个简单单词，句型最基础（如 I want... / It\'s a... / Can I...），家长与孩子对话',
+  2: '中级日常口语：每句 4-10 词，简短自然，像真实生活对话，拒绝书面长难句',
+  3: '进阶地道表达：每句 8-16 词，可用短语动词和从句，像母语者真实对话'
+};
+function aiScene(name) {
+  return mmChat([
+    { role: 'system', content: '你是英语口语教材编写专家，只输出教材内容本身。' },
+    { role: 'user', content: '围绕场景「' + name + '」生成一段实用英语对话，5 轮共 10 句。\n难度要求：' + LEVEL_BRIEF[state.set.level] + '\n格式要求：每行一条，严格按「角色: 英文句子 | 中文翻译」，角色名用简短英文（如 Mom, Doctor, Me, Clerk），第一人称用 Me，对话双方交替。不要输出任何其他内容。' }
+  ]).then(txt => {
+    const out = [];
+    txt.split('\n').forEach(line => {
+      const m = line.match(/^\s*([^\s:：|｜]{1,14})[:：]\s*(.+?)\s*[|｜]\s*(.+?)\s*$/);
+      if (m && m[2] && m[3]) out.push([m[1] + ': ' + m[2], m[1] + '：' + m[3]]);
+    });
+    if (out.length < 4) throw new Error('生成结果格式异常，请重试一次');
+    return out;
+  });
+}
+
 const totalSents = SCENARIOS.reduce((n, s) => n + s.sents.length, 0);
 
 /* ---------- 语音朗读 ---------- */
@@ -249,7 +310,7 @@ function playSegs(segs, i, voice, gen, card) {
 /* ---------- 收藏 ---------- */
 const sid2Sent = sid => {
   const i = sid.lastIndexOf(':');
-  const scn = SCENARIOS.find(s => s.id === sid.slice(0, i));
+  const scn = findScn(sid.slice(0, i));
   const idx = +sid.slice(i + 1);
   return scn && curSents(scn)[idx] ? { scn, idx, en: curSents(scn)[idx][0], zh: curSents(scn)[idx][1] } : null;
 };
@@ -281,6 +342,29 @@ function sentCard(scn, idx, showTag) {
   return card;
 }
 
+/* 自己添加的句子卡片：不参与收藏，带删除 */
+function mySentCard(scn, idx) {
+  const m = customSentsMap();
+  const [en, zh] = m[scn.id][idx];
+  const card = el('button', 's-card s-my');
+  card.appendChild(lineWithRole(en, 's-en'));
+  card.appendChild(lineWithRole(zh, 's-zh'));
+  card.appendChild(el('span', 's-tag', '📝 我添加的'));
+  const del = el('span', 's-fav s-del', '✕');
+  del.title = '删除这句';
+  card.appendChild(del);
+  card.addEventListener('click', () => speak(en, card));
+  del.addEventListener('click', ev => {
+    ev.stopPropagation();
+    if (!confirm('删除这句？')) return;
+    const mm = customSentsMap();
+    mm[scn.id].splice(idx, 1);
+    store.set('customSents', mm);
+    render();
+  });
+  return card;
+}
+
 /* ---------- 视图渲染 ---------- */
 const main = $('#main');
 
@@ -289,7 +373,7 @@ function renderCatBar() {
   bar.textContent = '';
   const all = [{ id: 'all', emoji: '🌐', zh: '全部' }].concat(CATS);
   all.forEach(c => {
-    const n = c.id === 'all' ? SCENARIOS.length : SCENARIOS.filter(s => s.cat === c.id).length;
+    const n = c.id === 'all' ? allScenarios().length : SCENARIOS.filter(s => s.cat === c.id).length;
     const b = el('button', 'cat-chip' + (state.cat === c.id ? ' active' : ''), c.emoji + ' ' + c.zh + ' ' + n);
     b.addEventListener('click', () => { state.cat = c.id; state.detail = null; state.query = ''; $('#search').value = ''; $('#search-clear').hidden = true; renderCatBar(); render(); });
     bar.appendChild(b);
@@ -300,7 +384,19 @@ function renderHome() {
   main.textContent = '';
   main.appendChild(el('div', 'sec-title', state.cat === 'all' ? '📚 全部场景' : '📚 ' + CATS.find(c => c.id === state.cat).emoji + ' ' + CATS.find(c => c.id === state.cat).zh));
   const grid = el('div', 'scn-grid');
-  SCENARIOS.filter(s => state.cat === 'all' || s.cat === state.cat).forEach(s => {
+  const mine = customScenes();
+  const list = state.cat === 'all' ? mine.concat(SCENARIOS) : SCENARIOS.filter(s => s.cat === state.cat);
+  if (state.cat === 'all') {
+    const add = el('button', 'scn-card scn-add');
+    add.appendChild(el('span', 'scn-emoji', '➕'));
+    const ainfo = el('div', 'scn-info');
+    ainfo.appendChild(el('div', 'scn-zh', '新建场景'));
+    ainfo.appendChild(el('div', 'scn-en', '输入名称，AI 生成对话'));
+    add.appendChild(ainfo);
+    add.addEventListener('click', () => { state.detail = '_create'; render(); });
+    grid.appendChild(add);
+  }
+  list.forEach(s => {
     const card = el('button', 'scn-card');
     card.appendChild(el('span', 'scn-emoji', s.emoji));
     const info = el('div', 'scn-info');
@@ -312,11 +408,12 @@ function renderHome() {
     grid.appendChild(card);
   });
   main.appendChild(grid);
-  main.appendChild(el('div', 'count-note', '共 ' + SCENARIOS.length + ' 个场景 · ' + (totalSents / 2) + ' 轮对话 · 点击句子即可朗读'));
+  main.appendChild(el('div', 'count-note', '共 ' + allScenarios().length + ' 个场景' + (mine.length ? '（含 ' + mine.length + ' 个自建）' : '') + ' · ' + (totalSents / 2) + ' 轮对话 · 点击句子即可朗读'));
 }
 
 function renderDetail() {
-  const scn = SCENARIOS.find(s => s.id === state.detail);
+  if (state.detail === '_create') { renderCreate(); return; }
+  const scn = findScn(state.detail);
   if (!scn) { state.detail = null; renderHome(); return; }
   main.textContent = '';
   const head = el('div', 'detail-head');
@@ -328,8 +425,99 @@ function renderDetail() {
   t.appendChild(el('div', 'detail-zh', scn.emoji + ' ' + scn.zh));
   t.appendChild(el('div', 'detail-en', scn.en + ' · ' + (curSents(scn).length / 2) + ' 轮对话 · ' + ({1:'🐣1级',2:'🌿2级',3:'🚀3级'})[state.set.level]));
   head.appendChild(t);
+  if (scn.custom) {
+    const del = el('button', 'back-btn', '🗑');
+    del.title = '删除这个自建场景';
+    del.addEventListener('click', () => {
+      if (!confirm('删除「' + scn.zh + '」以及在里面添加的句子？')) return;
+      store.set('customScenes', customScenes().filter(s => s.id !== scn.id));
+      const m = customSentsMap();
+      delete m[scn.id];
+      store.set('customSents', m);
+      state.detail = null;
+      render();
+    });
+    head.appendChild(del);
+  }
   main.appendChild(head);
   curSents(scn).forEach((_, i) => main.appendChild(sentCard(scn, i, false)));
+  const mySents = customSentsMap()[scn.id] || [];
+  if (mySents.length) {
+    main.appendChild(el('div', 'sec-title', '📝 我添加的句子（' + mySents.length + '）'));
+    mySents.forEach((_, i) => main.appendChild(mySentCard(scn, i)));
+  }
+  /* 添加句子：输入中文，AI 生成英文后可点读 */
+  const addBox = el('div', 'ai-box');
+  addBox.appendChild(el('div', 'ai-title', '➕ 添加句子'));
+  const ta = el('textarea', 'ai-input');
+  ta.rows = 2;
+  ta.placeholder = '输入这里还没有的中文句子，AI 生成英文后就能点读\n例如：医生，孩子从昨天开始有点咳嗽';
+  const addBtn = el('button', 'ai-btn', '✨ 生成英文并添加');
+  addBtn.addEventListener('click', () => {
+    const zh = ta.value.trim();
+    if (!zh) { alert('请先输入中文句子'); return; }
+    if (!state.set.mmKey) { alert('需要先在「设置」里填写真人发音 Key\n（生成句子用的是同一个 Key）'); return; }
+    addBtn.disabled = true;
+    addBtn.textContent = '⏳ 生成中…';
+    aiTranslate(zh).then(en => {
+      const m = customSentsMap();
+      if (!m[scn.id]) m[scn.id] = [];
+      m[scn.id].push([en, zh]);
+      store.set('customSents', m);
+      render();
+    }).catch(err => {
+      alert('生成失败：' + (err && err.message ? err.message : '网络错误') + '\n请检查网络，或到设置页确认真人发音 Key 有效');
+      addBtn.disabled = false;
+      addBtn.textContent = '✨ 生成英文并添加';
+    });
+  });
+  addBox.appendChild(ta);
+  addBox.appendChild(addBtn);
+  addBox.appendChild(el('div', 'ai-note', '只保存在这台设备 · 生成与朗读走你已填的 MiniMax Key，花极少余额'));
+  main.appendChild(addBox);
+}
+
+function renderCreate() {
+  main.textContent = '';
+  const head = el('div', 'detail-head');
+  const back = el('button', 'back-btn', '←');
+  back.title = '返回场景列表';
+  back.addEventListener('click', () => { state.detail = null; render(); });
+  head.appendChild(back);
+  const t = el('div', 'detail-title');
+  t.appendChild(el('div', 'detail-zh', '➕ 新建场景'));
+  t.appendChild(el('div', 'detail-en', '输入场景名称，AI 自动生成 ' + ({1:'🐣1级启蒙',2:'🌿2级日常',3:'🚀3级进阶'})[state.set.level] + ' 对话'));
+  head.appendChild(t);
+  main.appendChild(head);
+  const box = el('div', 'ai-box');
+  const input = el('input', 'ai-input');
+  input.type = 'text';
+  input.placeholder = '场景名称（中文），如：宠物医院看诊、去露营、面试自我介绍';
+  const btn = el('button', 'ai-btn', '✨ 生成 5 轮对话');
+  btn.addEventListener('click', () => {
+    const name = input.value.trim();
+    if (!name) { alert('请先输入场景名称'); return; }
+    if (!state.set.mmKey) { alert('需要先在「设置」里填写真人发音 Key\n（生成对话用的是同一个 Key）'); return; }
+    btn.disabled = true;
+    btn.textContent = '⏳ 正在生成，约 10 秒…';
+    aiScene(name).then(sents => {
+      const sc = { id: 'cs' + Date.now(), cat: 'custom', emoji: '📝', zh: name, en: 'Custom scene', sents: sents, custom: true };
+      const cs = customScenes();
+      cs.unshift(sc);
+      store.set('customScenes', cs);
+      state.detail = sc.id;
+      render();
+    }).catch(err => {
+      alert('生成失败：' + (err && err.message ? err.message : '网络错误') + '\n请检查网络，或到设置页确认真人发音 Key 有效');
+      btn.disabled = false;
+      btn.textContent = '✨ 生成 5 轮对话';
+    });
+  });
+  box.appendChild(input);
+  box.appendChild(btn);
+  box.appendChild(el('div', 'ai-note', '按当前难度等级生成 10 句 · 只保存在这台设备 · 生成后还可以继续往里加句子'));
+  main.appendChild(box);
+  main.appendChild(el('div', 'empty', '💡 场景示例：\n牙科看牙 · 幼儿园家长会 · 取快递 · 健身房办卡 · 机场值机\n\n小提示：在设置页切换难度等级后，这里生成的对话难度会跟着变'));
 }
 
 function renderSearch(q) {
@@ -337,15 +525,20 @@ function renderSearch(q) {
   const query = q.trim().toLowerCase();
   if (!query) { render(); return; }
   let hits = 0;
-  SCENARIOS.forEach(scn => {
+  allScenarios().forEach(scn => {
     const matched = [];
     curSents(scn).forEach((s, i) => {
       if (s[0].toLowerCase().indexOf(query) !== -1 || s[1].indexOf(query) !== -1) matched.push(i);
     });
-    if (matched.length) {
-      main.appendChild(el('div', 'result-group', scn.emoji + ' ' + scn.zh + '（' + matched.length + '）'));
+    const myMatched = [];
+    (customSentsMap()[scn.id] || []).forEach((s, i) => {
+      if (s[0].toLowerCase().indexOf(query) !== -1 || s[1].indexOf(query) !== -1) myMatched.push(i);
+    });
+    if (matched.length || myMatched.length) {
+      main.appendChild(el('div', 'result-group', scn.emoji + ' ' + scn.zh + '（' + (matched.length + myMatched.length) + '）'));
       matched.forEach(i => main.appendChild(sentCard(scn, i, false)));
-      hits += matched.length;
+      myMatched.forEach(i => main.appendChild(mySentCard(scn, i)));
+      hits += matched.length + myMatched.length;
     }
   });
   if (!hits) main.appendChild(el('div', 'empty', '没有找到相关句子\n换个关键词试试，比如「谢谢」「医院」「photo」'));
@@ -363,7 +556,7 @@ function renderFavs() {
     if (item.scn.cat !== lastCat) {
       lastCat = item.scn.cat;
       const cat = CATS.find(c => c.id === lastCat);
-      main.appendChild(el('div', 'fav-group-head', (cat ? cat.emoji + ' ' + cat.zh : '')));
+      main.appendChild(el('div', 'fav-group-head', (cat ? cat.emoji + ' ' + cat.zh : '📝 自建场景')));
     }
     main.appendChild(sentCard(item.scn, item.idx, true));
   });
