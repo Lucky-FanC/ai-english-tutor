@@ -41,6 +41,11 @@ button{font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparen
 /* ---------- 主内容 ---------- */
 .main{flex:1;overflow-y:auto;padding:2px 16px 90px;display:flex;flex-direction:column;gap:10px}
 
+/* KET 默写工具内嵌页 + 入口卡片 */
+.ket-frame{flex:1;width:100%;border:none;background:var(--bg);display:block}
+.ket-entry{grid-column:1/-1;background:linear-gradient(135deg,#FFF3E4,#FFE7CE);border-color:#FFD3A6}
+.ket-go{margin-left:auto;color:#E86F1D;font-weight:700;font-size:13px;flex:none}
+
 .sec-title{font-size:12.5px;font-weight:700;color:var(--muted);margin:6px 2px 0}
 .count-note{font-size:12px;color:var(--muted);text-align:center;padding:8px 0 4px}
 
