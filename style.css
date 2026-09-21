@@ -32,6 +32,11 @@ button{font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparen
 .icon-btn{border:1px solid var(--line);background:var(--panel);color:var(--muted);width:38px;height:38px;border-radius:12px;font-size:15px;display:grid;place-items:center;flex:none}
 .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
 
+/* 搜索/翻译 模式切换 */
+.mode-seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:2px;gap:2px;flex:none}
+.mode-seg button{border:none;background:none;border-radius:9px;padding:7px 10px;font-size:12.5px;color:var(--muted);font-weight:700}
+.mode-seg button.active{background:var(--accent);color:#fff}
+
 /* ---------- 分类条 ---------- */
 .cat-bar{display:flex;gap:8px;overflow-x:auto;padding:2px 16px 12px;scrollbar-width:none;flex:none}
 .cat-bar::-webkit-scrollbar{display:none}
