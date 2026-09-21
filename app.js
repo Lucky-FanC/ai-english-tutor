@@ -24,6 +24,8 @@ const state = {
   cat: 'all',           // 当前分类过滤
   detail: null,         // 正在浏览的场景 id
   query: '',
+  mode: 'search',       // 首页搜索框模式：search 搜句子 | trans 中译英
+  transList: [],        // 翻译结果（最新在前，只保留在本次会话）
   favs: store.get('favs', []),   // ["场景id:序号", ...]
   set: Object.assign({ rate: 1, accent: 'us', voice: 'auto', engine: 'auto', level: 2, mmKey: '' }, store.get('set', {})),
 };
@@ -548,6 +550,64 @@ function renderSearch(q) {
   if (!hits) main.appendChild(el('div', 'empty', '没有找到相关句子\n换个关键词试试，比如「谢谢」「医院」「photo」'));
 }
 
+/* ---------- 首页 搜索/翻译 双模式 ---------- */
+let transBusy = false;
+function setSearchMode(m) {
+  if (state.mode === m) return;
+  state.mode = m;
+  document.querySelectorAll('#mode-seg button').forEach(x => x.classList.toggle('active', x.dataset.mode === m));
+  searchInput.value = ''; state.query = '';
+  $('#search-clear').hidden = true;
+  searchInput.placeholder = m === 'trans'
+    ? '🌐 输入中文句子，回车翻译，如：孩子有点咳嗽'
+    : '🔍 搜句子，如：谢谢 / hospital / 迟到';
+  render();
+}
+
+/* 翻译一句中文：走与「添加句子」同一个 aiTranslate，结果入列表并自动朗读一遍 */
+function doTranslate() {
+  const zh = searchInput.value.trim();
+  if (!zh || transBusy) return;
+  if (!state.set.mmKey) { alert('需要先在「设置」里填写真人发音 Key\n（翻译用的是同一个 Key）'); return; }
+  if (state.tab !== 'home') switchTab('home'); /* 在任何 tab 翻译都回到场景页看结果（switchTab 会清空输入框，故先取走 zh） */
+  transBusy = true;
+  const item = { en: '', zh: zh, loading: true };
+  state.transList.unshift(item);
+  render();
+  aiTranslate(zh).then(en => {
+    transBusy = false;
+    item.en = en; delete item.loading;
+    searchInput.value = ''; $('#search-clear').hidden = true;
+    render();
+    const first = main.querySelector('.s-card');
+    if (first) speak(en, first); /* 翻译完自动朗读一遍，之后点卡片可再听 */
+  }).catch(err => {
+    transBusy = false;
+    state.transList = state.transList.filter(x => x !== item);
+    render();
+    alert('翻译失败：' + (err && err.message ? err.message : '网络错误') + '\n请检查网络，或到设置页确认真人发音 Key 有效');
+  });
+}
+
+function transCard(item) {
+  const card = el('button', 's-card');
+  card.appendChild(el('div', 's-en', item.loading ? '⏳ 翻译中…' : item.en));
+  card.appendChild(el('div', 's-zh', item.zh));
+  card.appendChild(el('span', 's-tag', '🌐 AI 翻译'));
+  if (!item.loading) card.addEventListener('click', () => speak(item.en, card));
+  return card;
+}
+function renderTrans() {
+  main.textContent = '';
+  main.appendChild(el('div', 'sec-title', '🌐 句子翻译（中文 → 英文）'));
+  if (!state.transList.length) {
+    main.appendChild(el('div', 'empty', '在上面输入一句中文，按回车，AI 翻译成地道英文\n翻译完自动朗读，点句子可反复听\n\n（翻译需要先在「设置」里填 MiniMax Key）'));
+    return;
+  }
+  state.transList.forEach(item => main.appendChild(transCard(item)));
+  main.appendChild(el('div', 'count-note', '翻译结果只保留在本次打开期间 · 刷新页面即清空'));
+}
+
 function renderFavs() {
   main.textContent = '';
   main.appendChild(el('div', 'sec-title', '⭐ 我的收藏（' + state.favs.length + '）'));
@@ -733,6 +793,12 @@ function render() {
   stopSpeak();
   syncKetTab();
   if (state.tab === 'ket') return; /* KET 默写工具：iframe 展示，不渲染主区 */
+  if (state.tab === 'home' && state.mode === 'trans') { /* 翻译模式：主区显示翻译列表，隐藏分类条 */
+    state.detail = null;
+    const cb = $('#cat-bar'); if (cb) cb.hidden = true;
+    renderTrans();
+    return;
+  }
   if (state.query.trim()) { renderSearch(state.query); return; }
   if (state.tab === 'favs') { renderFavs(); return; }
   if (state.tab === 'set') { renderSet(); return; }
@@ -776,21 +842,32 @@ document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => switchTab(t.dataset.tab));
 });
 
-/* ---------- 搜索 ---------- */
+/* ---------- 搜索 / 翻译 输入 ---------- */
 let searchTimer = null;
 const searchInput = $('#search');
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
+    if (state.mode === 'trans') { $('#search-clear').hidden = !searchInput.value; return; } /* 翻译模式输入不实时渲染 */
     state.query = searchInput.value;
     $('#search-clear').hidden = !state.query;
     render();
   }, 160);
 });
+searchInput.addEventListener('keydown', ev => {
+  if (state.mode === 'trans' && ev.key === 'Enter') { ev.preventDefault(); doTranslate(); }
+});
+searchInput.addEventListener('search', () => { if (state.mode === 'trans') doTranslate(); }); /* type=search 回车兜底（transBusy 防重复触发） */
 $('#search-clear').addEventListener('click', () => {
   searchInput.value = ''; state.query = ''; $('#search-clear').hidden = true; render();
   searchInput.focus();
 });
+document.querySelectorAll('#mode-seg button').forEach(b => {
+  b.addEventListener('click', () => { setSearchMode(b.dataset.mode); searchInput.focus(); });
+});
+
+/* 调试与测试钩子 */
+window.EAY = { state: state, setSearchMode: setSearchMode, doTranslate: doTranslate, render: render };
 
 /* ---------- 启动 ---------- */
 renderCatBar();
