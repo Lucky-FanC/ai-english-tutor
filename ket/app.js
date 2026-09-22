@@ -132,8 +132,8 @@ function hardRatio() {
 }
 
 /* ---------------- 选词 ---------------- */
-function pickNew(n) {
-  const pool = WORDS.filter(x => !learned[x.w]);
+function pickNew(n, excl) {
+  const pool = WORDS.filter(x => !learned[x.w] && !(excl && excl[x.w]));
   const easy = shuffle(pool.filter(x => x.lv === 1));
   const hard = shuffle(pool.filter(x => x.lv === 2));
   const nh = Math.min(hard.length, Math.round(n * hardRatio()));
@@ -204,6 +204,8 @@ function renderHome() {
   const revList = (!d0.rev) ? pickReview() : [];
   const newLeft = Math.max(0, Math.min(cfg.daily, WORDS.length - learnedN) - (d0.new || 0));
   const pending = store.get('session', null);
+  const pendL = store.get('learn', null);
+  const pendLOk = !!(pendL && pendL.words && pendL.words.length && pendL.idx < pendL.words.length);
   let hero;
   if (pending && pending.words && pending.words.length && pending.idx < pending.words.length) {
     hero = '<div class="hero"><div class="h1">✏️ 上次默写到一半</div><div class="sub">' + esc(pending.title) + ' · 第 ' + (pending.idx + 1) + '/' + pending.words.length + ' 个，接着来！</div>' +
@@ -211,13 +213,17 @@ function renderHome() {
   } else if (revList.length) {
     hero = '<div class="hero"><div class="h1">先复习错题</div><div class="sub">昨天错了 ' + revList.length + ' 个单词，先复习再学新词，记得更牢！</div>' +
       '<button class="btn" onclick="KET.startToday()">开始今日学习 ›</button></div>';
+  } else if (pendLOk) {
+    hero = '<div class="hero"><div class="h1">📖 学新词学到一半</div><div class="sub">这组还剩 ' + (pendL.words.length - pendL.idx) + ' 个没学完，接着上次的继续！</div>' +
+      '<button class="btn" onclick="KET.resumeLearn()">继续学习 ›</button></div>';
   } else if (newLeft > 0) {
     hero = '<div class="hero"><div class="h1">今日新词</div><div class="sub">今天还有 ' + newLeft + ' 个新单词等着宝贝，约 ' + Math.ceil(newLeft * 1.5) + ' 分钟</div>' +
       '<button class="btn" onclick="KET.startToday()">开始今日学习 ›</button></div>';
   } else if (learnedN >= WORDS.length && !wrongN) {
     hero = '<div class="hero done"><div class="h1">🎉 全部学完啦！</div><div class="sub">' + WORDS.length + ' 个 KET 核心词全部掌握，太棒了！</div></div>';
   } else {
-    hero = '<div class="hero done"><div class="h1">今日任务完成 ✓</div><div class="sub">可以去错题库巩固，或者做一次阶段测试</div></div>';
+    hero = '<div class="hero done"><div class="h1">今日任务完成 ✓</div><div class="sub"' + (learnedN < WORDS.length ? ' style="margin-bottom:10px"' : '') + '>可以去错题库巩固，或者做一次阶段测试</div>' +
+      (learnedN < WORDS.length ? '<button class="btn small" onclick="KET.learnMore()">➕ 多学几个</button>' : '') + '</div>';
   }
   return '' +
     '<div class="home-head"><div class="home-title">📝 KET 单词默写</div><div class="spacer"></div>' +
@@ -258,6 +264,9 @@ function startToday() {
   startNewFlow();
 }
 function startNewFlow() {
+  /* 上次没学完的词组还在：接着学同一批，不重新选 */
+  const q = store.get('learn', null);
+  if (q && q.words && q.words.length && q.idx < q.words.length) { resumeLearn(); return; }
   const t = todayStr();
   const d0 = doneMap[t] || {};
   const learnedN = Object.keys(learned).length;
@@ -265,12 +274,46 @@ function startNewFlow() {
   if (left <= 0 || learnedN >= WORDS.length) { toast('今日新词任务已完成啦'); go({ name: 'home' }); return; }
   const words = pickNew(left);
   if (!words.length) { toast('词库全部学完了，去测试一下吧'); go({ name: 'home' }); return; }
-  go({ name: 'learn', words: words, idx: 0, onDone: () => {
-    words.forEach(x => { if (!learned[x.w]) learned[x.w] = { d: t }; });
-    saveLearned();
-    const dm = doneMap[t] || {}; dm.new = (dm.new || 0) + words.length; doneMap[t] = dm; saveDone();
-    startDict({ title: '默写今日新词', type: 'new', words: words, after: () => go({ name: 'home' }) });
-  } });
+  go({ name: 'learn', words: words, idx: 0, fromNew: true, onDone: finishNewWords });
+  persistLearn();
+}
+/* 学新词断点：每翻一词存一次，随时退出，回来接着同一批继续 */
+function persistLearn() {
+  if (!view || view.name !== 'learn' || !view.fromNew) return;
+  store.set('learn', { words: view.words, idx: view.idx });
+}
+function resumeLearn() {
+  const q = store.get('learn', null);
+  if (!q || !q.words || !q.words.length || q.idx >= q.words.length) { startNewFlow(); return; }
+  go({ name: 'learn', words: q.words, idx: q.idx, fromNew: true, onDone: finishNewWords });
+}
+function finishNewWords() {
+  const t = todayStr();
+  const words = view.words;
+  words.forEach(x => { if (!learned[x.w]) learned[x.w] = { d: t }; });
+  saveLearned();
+  const dm = doneMap[t] || {}; dm.new = (dm.new || 0) + words.length; doneMap[t] = dm; saveDone();
+  store.set('learn', null);
+  startDict({ title: '默写今日新词', type: 'new', words: words, after: () => go({ name: 'home' }) });
+}
+/* 多学几个：学习中往当前词组追加 4 个新词；首页（今日已完成）新开一批 */
+function learnMore() {
+  const left = WORDS.length - Object.keys(learned).length;
+  if (left <= 0) { toast('词库全部学完啦，去测试一下吧'); return; }
+  let words, idx;
+  if (view && view.name === 'learn' && view.fromNew) { words = view.words; idx = view.idx; }
+  else {
+    const q = store.get('learn', null);
+    if (q && q.words && q.words.length && q.idx < q.words.length) { words = q.words; idx = q.idx; }
+    else { words = []; idx = 0; }
+  }
+  const excl = {};
+  words.forEach(x => { excl[x.w] = 1; });
+  const add = pickNew(Math.min(4, left), excl);
+  if (!add.length) { toast('没有更多新词啦'); return; }
+  go({ name: 'learn', words: words.concat(add), idx: idx, fromNew: true, onDone: finishNewWords });
+  persistLearn();
+  toast('已加 ' + add.length + ' 个新词，加油！');
 }
 
 /* ---------------- 学新词（看拼写 + 听音） ---------------- */
@@ -289,12 +332,15 @@ function renderLearn() {
     '<div class="muted">先听一听，跟着读两遍，记住怎么拼</div>' +
     '</div>' +
     '<div class="dots">' + dots + '</div>' +
-    '<button class="btn" onclick="KET.learnNext()">' + (last ? '都记住了，开始默写 ✏️' : '下一个 ›') + '</button>';
+    '<button class="btn" onclick="KET.learnNext()">' + (last ? '都记住了，开始默写 ✏️' : '下一个 ›') + '</button>' +
+    (view.fromNew ? '<div style="text-align:center;margin-top:10px"><button class="btn small ghost" onclick="KET.learnMore()">➕ 多学几个</button></div>' : '');
 }
 function learnNext() {
   say(view.words[view.idx].w); /* 翻页前再播一次，加深印象 */
   if (view.idx >= view.words.length - 1) { view.onDone(); return; }
-  view.idx++; render();
+  view.idx++;
+  persistLearn();
+  render();
 }
 
 /* ---------------- 纯听音默写 ---------------- */
@@ -642,7 +688,7 @@ function cancelReset() { go({ name: 'set' }); }
 function confirmReset() {
   const v = (document.getElementById('resetpw') || {}).value || '';
   if (hashStr(v.trim()) !== RESET_HASH) { toast('密码不对，没有清空任何数据'); return; }
-  ['cfg', 'learned', 'wrong', 'done', 'log', 'session'].forEach(k => localStorage.removeItem('ket.' + k));
+  ['cfg', 'learned', 'wrong', 'done', 'log', 'session', 'learn'].forEach(k => localStorage.removeItem('ket.' + k));
   location.reload();
 }
 
@@ -654,18 +700,18 @@ window.KET = {
   goReview: () => go({ name: 'review' }),
   goWords: () => go({ name: 'words' }), filterRows: filterRows,
   goAll: () => go({ name: 'allwords', lv: 0 }), allLv: allLv,
-  startToday: startToday, learnNext: learnNext, dictNext: dictNext,
+  startToday: startToday, learnNext: learnNext, dictNext: dictNext, learnMore: learnMore, resumeLearn: resumeLearn,
   resultNext: resultNext, delWrong: delWrong, startWrongDrill: startWrongDrill,
   startTest: startTest, stepDaily: stepDaily, toggleSlow: toggleSlow,
   saveKey: saveKey, testVoice: testVoice,
   askReset: askReset, cancelReset: cancelReset, confirmReset: confirmReset,
   quitDict: quitDict, resumeSession: resumeSession, redoDict: redoDict,
   startManualReview: startManualReview,
-  _v: () => view, _s: () => ({ cfg: cfg, learned: learned, wrong: wrongBk, done: doneMap, log: logArr, session: store.get('session', null) })
+  _v: () => view, _s: () => ({ cfg: cfg, learned: learned, wrong: wrongBk, done: doneMap, log: logArr, session: store.get('session', null), learnq: store.get('learn', null) })
 };
 
 render();
-window.addEventListener('pagehide', persistDict); /* 切后台/关页面时保存默写进度 */
+window.addEventListener('pagehide', () => { persistDict(); persistLearn(); }); /* 切后台/关页面时保存默写/学词进度 */
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
