@@ -1,7 +1,7 @@
 /* ============================================================
    KET 单词默写小助手
-   每日流程：复习昨日错题 → 学新词(看拼写+听音) → 纯听音默写 → 统一批改
-   错题闭环：错词自动入库 → 次日优先复习 → 连对2次自动移出
+   每日流程：学新词(看拼写+听音) → 错题巩固(先看词听音再考) → 新词+错题混合默写验证 → 统一批改
+   错题闭环：错词自动入库 → 次日纳入错题巩固（先学后验） → 连对2次自动移出
    阶段测试：周测 / 月测 / 自定义区间测（统一批改+正确率）
    动态难度：0-6月 20%进阶 → 6-12月渐变 → 80%进阶
    ============================================================ */
@@ -201,7 +201,6 @@ function renderHome() {
   const d0 = doneMap[t] || {};
   const wrongN = Object.keys(wrongBk).length;
   const learnedN = Object.keys(learned).length;
-  const revList = (!d0.rev) ? pickReview() : [];
   const newLeft = Math.max(0, Math.min(cfg.daily, WORDS.length - learnedN) - (d0.new || 0));
   const pending = store.get('session', null);
   const pendL = store.get('learn', null);
@@ -210,11 +209,9 @@ function renderHome() {
   if (pending && pending.words && pending.words.length && pending.idx < pending.words.length) {
     hero = '<div class="hero"><div class="h1">✏️ 上次默写到一半</div><div class="sub">' + esc(pending.title) + ' · 第 ' + (pending.idx + 1) + '/' + pending.words.length + ' 个，接着来！</div>' +
       '<button class="btn" onclick="KET.resumeSession()">继续默写 ›</button></div>';
-  } else if (revList.length) {
-    hero = '<div class="hero"><div class="h1">先复习错题</div><div class="sub">昨天错了 ' + revList.length + ' 个单词，先复习再学新词，记得更牢！</div>' +
-      '<button class="btn" onclick="KET.startToday()">开始今日学习 ›</button></div>';
   } else if (pendLOk) {
-    hero = '<div class="hero"><div class="h1">📖 学新词学到一半</div><div class="sub">这组还剩 ' + (pendL.words.length - pendL.idx) + ' 个没学完，接着上次的继续！</div>' +
+    const wq = pendL.stage === 'wrong';
+    hero = '<div class="hero"><div class="h1">📖 ' + (wq ? '错题巩固' : '学新词') + '学到一半</div><div class="sub">这组还剩 ' + (pendL.words.length - pendL.idx) + ' 个没学完，接着上次的继续！</div>' +
       '<button class="btn" onclick="KET.resumeLearn()">继续学习 ›</button></div>';
   } else if (newLeft > 0) {
     hero = '<div class="hero"><div class="h1">今日新词</div><div class="sub">今天还有 ' + newLeft + ' 个新单词等着宝贝，约 ' + Math.ceil(newLeft * 1.5) + ' 分钟</div>' +
@@ -244,23 +241,7 @@ function renderHome() {
 
 /* ---------------- 每日学习流程 ---------------- */
 function startToday() {
-  const t = todayStr();
-  const d0 = doneMap[t] || {};
-  if (!d0.rev) {
-    const rev = pickReview();
-    if (rev.length) {
-      startDict({
-        title: '复习昨日错题', type: 'review',
-        words: rev.map(wordObj),
-        after: () => {
-          const dm = doneMap[t] || {}; dm.rev = true; doneMap[t] = dm; saveDone();
-          startNewFlow();
-        }
-      });
-      return;
-    }
-    const dm = doneMap[t] || {}; dm.rev = true; doneMap[t] = dm; saveDone();
-  }
+  /* 新流程：不再用错题默写卡住新词；先学新词，学完后进错题巩固（先学再验证） */
   startNewFlow();
 }
 function startNewFlow() {
@@ -274,18 +255,23 @@ function startNewFlow() {
   if (left <= 0 || learnedN >= WORDS.length) { toast('今日新词任务已完成啦'); go({ name: 'home' }); return; }
   const words = pickNew(left);
   if (!words.length) { toast('词库全部学完了，去测试一下吧'); go({ name: 'home' }); return; }
-  go({ name: 'learn', words: words, idx: 0, fromNew: true, onDone: finishNewWords });
+  go({ name: 'learn', words: words, idx: 0, stage: 'new', onDone: finishNewWords });
   persistLearn();
 }
-/* 学新词断点：每翻一词存一次，随时退出，回来接着同一批继续 */
+/* 学词断点：每翻一词存一次（新词/错题巩固都存），随时退出，回来接着同一批继续 */
 function persistLearn() {
-  if (!view || view.name !== 'learn' || !view.fromNew) return;
-  store.set('learn', { words: view.words, idx: view.idx });
+  if (!view || view.name !== 'learn' || !view.stage) return;
+  store.set('learn', { words: view.words, idx: view.idx, stage: view.stage, with: view.withWords || null });
 }
 function resumeLearn() {
   const q = store.get('learn', null);
   if (!q || !q.words || !q.words.length || q.idx >= q.words.length) { startNewFlow(); return; }
-  go({ name: 'learn', words: q.words, idx: q.idx, fromNew: true, onDone: finishNewWords });
+  if (q.stage === 'wrong') {
+    const wrongs = q.words, newWords = q.with || [];
+    go({ name: 'learn', title: '错题巩固', stage: 'wrong', words: wrongs, idx: q.idx, withWords: newWords, onDone: () => startVerifyDict(newWords, wrongs) });
+    return;
+  }
+  go({ name: 'learn', words: q.words, idx: q.idx, stage: 'new', onDone: finishNewWords });
 }
 function finishNewWords() {
   const t = todayStr();
@@ -294,24 +280,43 @@ function finishNewWords() {
   saveLearned();
   const dm = doneMap[t] || {}; dm.new = (dm.new || 0) + words.length; doneMap[t] = dm; saveDone();
   store.set('learn', null);
-  startDict({ title: '默写今日新词', type: 'new', words: words, after: () => go({ name: 'home' }) });
+  /* 错题纳入巩固环节：学完新词后，把待巩固错题先学一遍（看词听音），再统一默写验证 */
+  const wq = pickReview();
+  if (wq.length) {
+    const wrongs = wq.map(wordObj);
+    go({ name: 'learn', title: '错题巩固', stage: 'wrong', words: wrongs, idx: 0, withWords: words, onDone: () => startVerifyDict(words, wrongs) });
+    persistLearn();
+    return;
+  }
+  startVerifyDict(words, []);
+}
+/* 默写验证：新词 +（有错题时）错题一起打乱默写，全部学完后再验证 */
+function startVerifyDict(newWords, wrongWords) {
+  store.set('learn', null);
+  const all = shuffle(newWords.concat(wrongWords));
+  startDict({
+    title: wrongWords.length ? '默写验证' : '默写今日新词',
+    type: 'verify', words: all,
+    after: () => go({ name: 'home' })
+  });
 }
 /* 多学几个：学习中往当前词组追加 4 个新词；首页（今日已完成）新开一批 */
 function learnMore() {
   const left = WORDS.length - Object.keys(learned).length;
   if (left <= 0) { toast('词库全部学完啦，去测试一下吧'); return; }
   let words, idx;
-  if (view && view.name === 'learn' && view.fromNew) { words = view.words; idx = view.idx; }
+  if (view && view.name === 'learn' && view.stage === 'new') { words = view.words; idx = view.idx; }
   else {
     const q = store.get('learn', null);
-    if (q && q.words && q.words.length && q.idx < q.words.length) { words = q.words; idx = q.idx; }
+    if (q && q.words && q.words.length && q.idx < q.words.length && q.stage !== 'wrong') { words = q.words; idx = q.idx; }
+    else if (q && q.words && q.words.length && q.idx < q.words.length) { resumeLearn(); return; } /* 错题巩固中：先接着学完 */
     else { words = []; idx = 0; }
   }
   const excl = {};
   words.forEach(x => { excl[x.w] = 1; });
   const add = pickNew(Math.min(4, left), excl);
   if (!add.length) { toast('没有更多新词啦'); return; }
-  go({ name: 'learn', words: words.concat(add), idx: idx, fromNew: true, onDone: finishNewWords });
+  go({ name: 'learn', words: words.concat(add), idx: idx, stage: 'new', onDone: finishNewWords });
   persistLearn();
   toast('已加 ' + add.length + ' 个新词，加油！');
 }
@@ -333,7 +338,7 @@ function renderLearn() {
     '</div>' +
     '<div class="dots">' + dots + '</div>' +
     '<button class="btn" onclick="KET.learnNext()">' + (last ? '都记住了，开始默写 ✏️' : '下一个 ›') + '</button>' +
-    (view.fromNew ? '<div style="text-align:center;margin-top:10px"><button class="btn small ghost" onclick="KET.learnMore()">➕ 多学几个</button></div>' : '');
+    (view.stage === 'new' ? '<div style="text-align:center;margin-top:10px"><button class="btn small ghost" onclick="KET.learnMore()">➕ 多学几个</button></div>' : '');
 }
 function learnNext() {
   say(view.words[view.idx].w); /* 翻页前再播一次，加深印象 */
@@ -392,7 +397,7 @@ function quitDict() { persistDict(); go({ name: 'home' }); }
 function resumeSession() {
   const s = store.get('session', null);
   if (!s || !s.words || !s.words.length) { toast('没有未完成的默写'); return; }
-  const backs = { wrong: () => go({ name: 'wrong' }), test: () => go({ name: 'test' }), new: () => go({ name: 'home' }), review: () => go({ name: 'home' }) };
+  const backs = { wrong: () => go({ name: 'wrong' }), test: () => go({ name: 'test' }), new: () => go({ name: 'home' }), review: () => go({ name: 'home' }), verify: () => go({ name: 'home' }) };
   const after = (backs[s.type] || backs.new);
   view.after = null;
   go({ name: 'dict', title: s.title, type: s.type, words: s.words, idx: Math.min(s.idx, s.words.length - 1), answers: s.answers || {}, after: after });
@@ -418,6 +423,7 @@ function finishDict() {
   saveWrong();
   logArr.push({ d: t, type: view.type, total: list.length, right: right });
   saveLog();
+  if (view.type === 'verify') { const dm = doneMap[t] || {}; dm.rev = true; doneMap[t] = dm; saveDone(); } /* 当日全流程完成标记 */
   const after = view.after;
   go({ name: 'result', results: results, right: right, type: view.type, graduated: graduated, after: after });
 }
@@ -432,7 +438,7 @@ function praise(pct) {
 function renderResult() {
   const total = view.results.length;
   const pct = Math.round(view.right / total * 100);
-  const typeName = { new: '新词默写', review: '错题复习', wrong: '错题练习', test: '阶段测试' }[view.type] || '默写';
+  const typeName = { new: '新词默写', review: '错题复习', wrong: '错题练习', test: '阶段测试', verify: '默写验证' }[view.type] || '默写';
   const rows = view.results.map(r =>
     '<div class="result-item">' +
     '<div class="mark">' + (r.ok ? '✅' : '❌') + '</div>' +
@@ -448,7 +454,7 @@ function renderResult() {
     '<div style="font-weight:800;margin-top:10px">' + typeName + ' · 对 ' + view.right + ' / ' + total + '</div>' +
     '<div class="muted">' + praise(pct) + '</div>' +
     (view.graduated.length ? '<div style="margin-top:8px;color:var(--green);font-weight:700">🎓 移出错题库：' + esc(view.graduated.join('、')) + '</div>' : '') +
-    (view.type === 'new' ? '<div class="muted" style="margin-top:6px">❌ 的单词已自动加入错题库，明天优先复习</div>' : '') +
+    (view.type === 'new' || view.type === 'verify' ? '<div class="muted" style="margin-top:6px">❌ 的单词已自动加入错题库，明天优先复习</div>' : '') +
     '</div>' +
     '<div class="card"><div class="result-list">' + rows + '</div></div>' +
     '<div class="result-actions">' +
@@ -612,7 +618,7 @@ function renderTest() {
 function renderReport() {
   const learnedN = Object.keys(learned).length;
   const wrongN = Object.keys(wrongBk).length;
-  const typeName = { new: '新词', review: '复习', wrong: '错题', test: '测试' };
+  const typeName = { new: '新词', review: '复习', wrong: '错题', test: '测试', verify: '验证' };
   const logs = logArr.slice(-20).reverse().map(l => {
     const pct = l.total ? Math.round(l.right / l.total * 100) : 0;
     const cls = pct >= 80 ? 'good' : pct >= 60 ? 'mid' : 'poor';
